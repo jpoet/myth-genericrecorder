@@ -33,6 +33,8 @@ class Recorder:
         self.stdout_lock = threading.Lock()
         self.stderr_lock = threading.Lock()
         self.tune_process = None
+        self.ondatastart_process = None
+        self.ondatastart_done    = False
         self.tune_thread = None
         self.tune_status = "Idle"  # Idle, InProgress, Tuned
 
@@ -124,11 +126,12 @@ class Recorder:
         channum = self.variables.get('CHANNUM', None)
         self.logger.info(f"Checking for {variable} for channum {channum}")
         if not channum:
+            self.logger.error(f"Could not determine channum for {variable}")
             return default
 
         if 'CHANNELS' in self.config:
-            self.logger.info(f"Looking for {channum} in "
-                             "{self.config['TUNER']['CHANNELS']}")
+            self.logger.debug(f"Looking for {channum} in "
+                             f"{self.config['TUNER']['CHANNELS']}")
             channel_config = self.config['CHANNELS'].get(channum, {})
             if variable in channel_config:
                 value = channel_config[variable]
@@ -152,7 +155,7 @@ class Recorder:
         """ Example response:
         {"command":"Version?","message":"2.0","serial":"3","status":"OK"}
         """
-        self.logger.warning(f"Variables:\n{self.variables}")
+        self.logger.debug(f"Variables:\n{self.variables}")
 
         self.logger.debug("Description? called")
         # Get description from config if available
@@ -509,20 +512,21 @@ class Recorder:
             while True:
                 # Check for events (0.1s timeout so loop remains responsive)
                 events = sel.select(timeout=0.1)
-                if events:
-                    break
-
-                if self.process.poll() is not None:
+                if events or self.process.poll() is not None:
                     break
 
             sel.unregister(self.process.stdout)
             sel.close()
 
-            # Execute ondatastart command if available
-            ondatastart_cmd = self._get_ondatastart_command()
-            if ondatastart_cmd:
-                self.logger.info(f"Executing ondatastart command: {ondatastart_cmd}")
-                self._execute_ondatastart_command(ondatastart_cmd)
+            if self.ondatastart_done:
+                self.logger.info("Already ran OnDataStart")
+            else:
+                # Execute ondatastart command if available
+                ondatastart_cmd = dequote(self._get_ondatastart_command())
+                if ondatastart_cmd:
+                    self.logger.info(f"Executing ondatastart command: {ondatastart_cmd}")
+                    self._execute_ondatastart_command(ondatastart_cmd)
+                    self.ondatastart_done = True
 
             while self.streaming:
                 # Read up to block_size at a time
@@ -562,7 +566,9 @@ class Recorder:
         """Get the ondatastart command for the current channel."""
 
         command = self.config.get('TUNER', {}).get('ONDATASTART', "")
+        self.logger.debug(f"ONDATASTART: generic '{command}'")
         command = self.channel_override("ONSTART", command)
+        self.logger.debug(f"ONDATASTART: channel '{command}'")
 
         if command:
             command = self.replace_variables_in_string(command)
@@ -575,35 +581,17 @@ class Recorder:
             return
 
         self.logger.debug(f"Executing ondatastart command: {command}")
-        # Check if command should run in background (has trailing &)
-        background = command.endswith(' &')
-        if background:
-            command = command[:-2].strip()
-
-            # Execute in background
-            try:
-                cmd_args = shlex.split(command)
-                subprocess.Popen(
-                    cmd_args,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE
-                )
-                self.logger.info(f"Started background ondatastart command: {command}")
-            except Exception as e:
-                self.logger.error(f"Error starting background ondatastart command: {e}")
-        else:
-            # Execute in foreground
-            try:
-                cmd_args = shlex.split(command)
-                process = subprocess.Popen(
-                    cmd_args,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE
-                )
-                process.wait()
-                self.logger.info(f"Completed ondatastart command: {command}")
-            except Exception as e:
-                self.logger.error(f"Error executing ondatastart command: {e}")
+        # Execute in background
+        try:
+            cmd_args = shlex.split(command)
+            self.ondatastart_process = subprocess.Popen(
+                cmd_args,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE
+            )
+            self.logger.info(f"Started background ondatastart command: {command}")
+        except Exception as e:
+            self.logger.error(f"Error starting background ondatastart command: {e}")
 
     def replace_variables_in_string(self, value: str) -> str:
         if not value:

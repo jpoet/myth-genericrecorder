@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Main module for myth-externalrecorder program."""
+"""Main module for myth-genericrecorder program."""
 import argparse
 import json
 import logging
@@ -12,7 +12,7 @@ from typing import Dict, Any, Optional
 import configparser
 import re
 
-from myth_externalrecorder.recorder import Recorder
+from myth_genericrecorder.recorder import Recorder
 
 # Setup logging
 def setup_logging(log_file: Path, quiet: bool = True) -> None:
@@ -52,7 +52,7 @@ def setup_logging(log_file: Path, quiet: bool = True) -> None:
 def parse_arguments() -> argparse.Namespace:
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(
-        description="External recorder that processes JSON commands "
+        description="Generic recorder that processes JSON commands "
                     "and executes external commands",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
@@ -116,7 +116,7 @@ Usage examples:
     )
     parser.add_argument(
         "--logfile",
-        help="Path to log file (default: ~/log/external-recorder.log)",
+        help="Path to log file (default: ~/log/myth-genericrecorder.log)",
         type=Path,
         required=False
     )
@@ -201,14 +201,14 @@ def main():
     else:
         log_dir = Path.home() / "log"
         log_dir.mkdir(exist_ok=True)
-        log_file = log_dir / "external_recorder.log"
+        log_file = log_dir / "myth-genericrecorder.log"
 
     setup_logging(log_file, args.quiet)
 
     logger = logging.getLogger(__name__)
     logger.setLevel(logging.INFO)
 
-    logger.info("Starting ExternalRecorder")
+    logger.info("Starting GenericRecorder")
     logger.debug(f"Command line arguments: {args}")
     logger.debug(f"Log file path: {log_file}")
 

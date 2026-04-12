@@ -3,9 +3,9 @@ requires = ["setuptools>=45", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "myth_externalrecorder"
+name = "myth_genericrecorder"
 version = "1.0.0"
-description = "MythTV External recorder that processes JSON commands and executes external commands"
+description = "MythTV Generic recorder that processes JSON commands and executes external commands"
 authors = [{name = "Developer", email = "developer@example.com"}]
 license = "MIT"
 readme = "README.md"
@@ -19,7 +19,7 @@ dependencies = [
 ]
 
 [project.scripts]
-myth-externalrecorder = "myth_externalrecorder.main:main"
+myth-genericrecorder = "myth_genericrecorder.main:main"
 
 [project.optional-dependencies]
 dev = [
@@ -29,4 +29,4 @@ dev = [
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["myth_externalrecorder*"]
+include = ["myth_genericrecorder*"]
