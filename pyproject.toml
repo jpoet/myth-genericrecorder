@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "myth_externalrecorder"
+version = "1.0.0"
+description = "MythTV External recorder that processes JSON commands and executes external commands"
+authors = [{name = "Developer", email = "developer@example.com"}]
+license = "MIT"
+readme = "README.md"
+requires-python = ">=3.8"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "watchdog>=2.1.0",
+]
+
+[project.scripts]
+myth-externalrecorder = "myth_externalrecorder.main:main"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=6.0",
+    "black>=21.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["myth_externalrecorder*"]
