@@ -124,13 +124,13 @@ class Recorder:
     def channel_override(self, variable : str, default : str):
         # Get the channum from variables
         channum = self.variables.get('CHANNUM', None)
-        self.logger.info(f"Checking for {variable} for channum {channum}")
+        self.logger.info(f"Looking for {variable} for channum {channum}")
         if not channum:
             self.logger.error(f"Could not determine channum for {variable}")
             return default
 
         if 'CHANNELS' in self.config:
-            self.logger.debug(f"Looking for {channum} in "
+            self.logger.info(f"Looking for {channum} in "
                              f"{self.config['TUNER']['CHANNELS']}")
             channel_config = self.config['CHANNELS'].get(channum, {})
             if variable in channel_config:
@@ -344,7 +344,7 @@ class Recorder:
 
     def is_open(self, **kwargs) -> None:
         self.logger.debug("IsOpen? called")
-        msg = "Open" if self.streaming else "No"
+        msg = "Open" if self.process else "No"
         self.send_response(kwargs, {"status": "OK", "message": msg})
 
     def start_streaming(self, **kwargs) -> None:

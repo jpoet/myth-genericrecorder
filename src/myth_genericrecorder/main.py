@@ -39,7 +39,7 @@ def setup_logging(log_file: Path, quiet: bool = True) -> None:
                 "level": "DEBUG",
                 "formatter": "standard",
                 "filename": str(log_file),
-                "mode": "w"
+                "mode": "a"
             }
         },
         "root": {
@@ -57,14 +57,14 @@ def parse_arguments() -> argparse.Namespace:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Usage examples:
-  %(prog)s --command "ffmpeg -i input.mp4 output.mp4"
+  %(prog)s --conf "/home/myth/etc/magewell-1-4.conf"
   %(prog)s --command "vlc --demux=mp4 input.mp4" --dry-run
   %(prog)s --command "streamlink twitch.tv/channel best"
         """
     )
     parser.add_argument(
         "--verbose",
-        help="MythTV verbose categories",
+        help="MythTV verbose categories (ignored)",
         type=str,
         required=False
     )
@@ -77,7 +77,7 @@ Usage examples:
     parser.add_argument(
         "--inputid",
         help="InputID used to enforce unique command",
-        required=False
+        required=True
     )
     parser.add_argument(
         "--command",
@@ -112,12 +112,6 @@ Usage examples:
         help="Block size for streaming (default: 64k)",
         type=int,
         default=65536,
-        required=False
-    )
-    parser.add_argument(
-        "--logfile",
-        help="Path to log file (default: ~/log/myth-genericrecorder.log)",
-        type=Path,
         required=False
     )
     parser.add_argument(
@@ -194,14 +188,14 @@ def main():
     variables = None
 
     # Setup logging
-    if args.logfile:
-        log_file = args.logfile
-        # Ensure directory exists
-        log_file.parent.mkdir(parents=True, exist_ok=True)
+    if args.logpath:
+        log_dir = args.logpath
     else:
         log_dir = Path.home() / "log"
-        log_dir.mkdir(exist_ok=True)
-        log_file = log_dir / "myth-genericrecorder.log"
+
+    # Ensure directory exists
+    log_dir.parent.mkdir(parents=True, exist_ok=True)
+    log_file = log_dir / f"myth-genericrecorder-{args.inputid}.log"
 
     setup_logging(log_file, args.quiet)
 
