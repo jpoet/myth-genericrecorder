@@ -8,10 +8,20 @@ The configuration file is slightly different. Variables in use look like ${var_n
 ## Installation
 
 ```bash
+sudo pipx ensurepath --global
+sudo pipx install --global git+https://github.com/jpoet/myth-genericrecorder.git
+```
+or
+```
+sudo pipx ensurepath --global
 git clone https://github.com/jpoet/myth-genericrecorder.git
 cd myth-genericrecorder
-pip install -e .
-myth-genericrecorder --help
+sudo pipx install --global .
+```
+
+## Uninstall
+```
+sudo pipx uninstall --global  myth-genericrecorder
 ```
 
 ## Usage
@@ -19,6 +29,7 @@ myth-genericrecorder --help
 ### Basic Usage
 Meant to be controlled as a "Black Box" recorder from mythbackend. For example:
 ```
+/usr/local/bin/myth-genericrecorder --help
 /usr/local/bin/myth-genericrecorder --conf /home/mythtv/etc/magewell-2-1-4.conf
 ```
 

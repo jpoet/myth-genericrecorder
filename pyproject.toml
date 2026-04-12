@@ -1,31 +1,23 @@
 [build-system]
-requires = ["setuptools>=45", "wheel"]
+requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "myth_genericrecorder"
-version = "1.0.0"
+name = "myth-genericrecorder"
+version = "0.1.0"
 description = "MythTV Generic recorder that processes JSON commands and executes external commands"
-authors = [{name = "Developer", email = "developer@example.com"}]
+requires-python = ">=3.8"
+dependencies = [
+]
+authors = [{name = "John Patrick Poet", email = "jpoet@mythtv.org"}]
 license = "MIT"
 readme = "README.md"
-requires-python = ">=3.8"
 classifiers = [
-    "Programming Language :: Python :: 3",
-    "Operating System :: OS Independent",
-]
-dependencies = [
-    "watchdog>=2.1.0",
+    "Programming Language :: Python :: 3"
 ]
 
 [project.scripts]
 myth-genericrecorder = "myth_genericrecorder.main:main"
-
-[project.optional-dependencies]
-dev = [
-    "pytest>=6.0",
-    "black>=21.0",
-]
 
 [tool.setuptools.packages.find]
 where = ["src"]
