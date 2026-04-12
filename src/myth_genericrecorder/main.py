@@ -58,7 +58,7 @@ def parse_arguments() -> argparse.Namespace:
         epilog="""
 Usage examples:
   %(prog)s --conf "/home/myth/etc/magewell-1-4.conf"
-  %(prog)s --command "vlc --demux=mp4 input.mp4" --dry-run
+  %(prog)s --command "vlc --demux=mp4 input.mp4"
   %(prog)s --command "streamlink twitch.tv/channel best"
         """
     )
@@ -77,18 +77,14 @@ Usage examples:
     parser.add_argument(
         "--inputid",
         help="InputID used to enforce unique command",
-        required=True
+        default=0,
+        required=False
     )
     parser.add_argument(
         "--command",
         help="External command to execute during streaming",
         type=str,
         required=False
-    )
-    parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Don't actually execute commands, just log what would happen"
     )
     parser.add_argument(
         "--quiet",
@@ -118,6 +114,7 @@ Usage examples:
         "--logpath",
         help="Path to MythTV logging directory",
         type=Path,
+        default=Path.home() / 'log',
         required=False
     )
     return parser.parse_args()
@@ -202,7 +199,7 @@ def main():
     logger = logging.getLogger(__name__)
     logger.setLevel(logging.INFO)
 
-    logger.info("Starting GenericRecorder")
+    logger.critical("Starting myth-genericrecorder")
     logger.debug(f"Command line arguments: {args}")
     logger.debug(f"Log file path: {log_file}")
 
@@ -219,7 +216,6 @@ def main():
     # Create recorder with configuration
     recorder = Recorder(
         command=args.command,
-        dry_run=args.dry_run,
         logger=logger,
         tune_command=args.tune,
         config=config,

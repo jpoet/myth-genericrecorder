@@ -16,35 +16,36 @@ class Recorder:
     """Recorder class to handle streaming and command execution."""
 
     def __init__(self, command: Optional[str] = None,
-                 dry_run: bool = False,
                  logger: Optional[logging.Logger] = None,
                  tune_command: Optional[str] = None,
                  config: Optional[Dict] = None,
                  variables: Dict = None,
                  block_size: int = 65536):
         """Initialize the recorder."""
-        self.command = None
-        self.dry_run = dry_run
-        self.logger = logger or logging.getLogger(__name__)
-        self.streaming = False
-        self.stream_thread = None
-        self.stderr_thread = None
-        self.process = None
-        self.stdout_lock = threading.Lock()
-        self.stderr_lock = threading.Lock()
-        self.tune_process = None
+        self.command             = None
+        self.logger              = logger or logging.getLogger(__name__)
+        self.streaming           = False
+        self.stream_thread       = None
+        self.stderr_thread       = None
+        self.stream_process      = None
+        self.xon_process         = None
+        self.stdout_lock         = threading.Lock()
+        self.stderr_lock         = threading.Lock()
+        self.tune_process        = None
         self.ondatastart_process = None
         self.ondatastart_done    = False
-        self.tune_thread = None
-        self.tune_status = "Idle"  # Idle, InProgress, Tuned
+        self.tune_thread         = None
+        self.tune_status         = "Idle"  # Idle, InProgress, Tuned
 
         # Configuration
-        self.config = config or {}
+        self.config    = config or {}
         self.variables = variables
 
+        """
         if variables is not None:
             for key, value in self.variables.items():
                 self.variables[key] = self.replace_variables_in_string(value)
+        """
 
         if command is not None and len(command) > 0:
             self.config['RECORDER']['command'] = command
@@ -52,6 +53,7 @@ class Recorder:
             self.config['TUNER']['command'] = tune_command
 
         # XON/XOFF state
+        self.variables['XONCOUNT'] = 0
         self.xon_state = False  # Start in XOFF state
 
         # Block size
@@ -124,9 +126,9 @@ class Recorder:
     def channel_override(self, variable : str, default : str):
         # Get the channum from variables
         channum = self.variables.get('CHANNUM', None)
-        self.logger.info(f"Looking for {variable} for channum {channum}")
+        self.logger.debug(f"Looking for {variable} for channum {channum}")
         if not channum:
-            self.logger.error(f"Could not determine channum for {variable}")
+            self.logger.debug(f"Could not determine channum for {variable}")
             return default
 
         if 'CHANNELS' in self.config:
@@ -260,48 +262,19 @@ class Recorder:
             })
             return
 
-        # Replace variables in the tune command
-        tune_cmd = dequote(self.replace_variables_in_string(tune_cmd))
+        self.tune_status = "InProgress"
+        self.tune_process = self._execute_command(tune_cmd, "tune",
+                                                  background=True)
 
-        self.logger.debug(f"Final tune command after variable replacement: {tune_cmd}")
+        # Start thread to monitor completion
+        self.tune_thread = threading.Thread(target=self._monitor_tune_completion)
+        self.tune_thread.daemon = True
+        self.tune_thread.start()
 
-        if self.dry_run:
-            self.logger.info(f"[DRY RUN] Would execute tune command: {tune_cmd}")
-            self.tune_status = "InProgress"
-            self.send_response(kwargs, {
-                "status": "OK",
-                "message": f"InProgress `{tune_cmd}`"
-            })
-            return
-
-        try:
-            cmd_args = shlex.split(tune_cmd)
-            # Run in background
-            self.logger.info(f"Starting background tune command: {tune_cmd}")
-
-            self.tune_status = "InProgress"
-            self.tune_process = subprocess.Popen(
-                cmd_args,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE
-            )
-
-            # Start thread to monitor completion
-            self.tune_thread = threading.Thread(target=self._monitor_tune_completion)
-            self.tune_thread.daemon = True
-            self.tune_thread.start()
-
-            self.send_response(kwargs, {
-                "status": "OK",
-                "message": f"InProgress `{tune_cmd}`"
-            })
-
-        except Exception as e:
-            self.logger.error(f"Error starting tune command: {e}")
-            self.send_response(kwargs, {
-                "status": "error",
-                "message": str(e)
-            })
+        self.send_response(kwargs, {
+            "status": "OK",
+            "message": f"InProgress `{tune_cmd}`"
+        })
 
     def _monitor_tune_completion(self) -> None:
         """Monitor tune command completion."""
@@ -344,7 +317,7 @@ class Recorder:
 
     def is_open(self, **kwargs) -> None:
         self.logger.debug("IsOpen? called")
-        msg = "Open" if self.process else "No"
+        msg = "Open" if self.stream_process else "No"
         self.send_response(kwargs, {"status": "OK", "message": msg})
 
     def start_streaming(self, **kwargs) -> None:
@@ -393,13 +366,13 @@ class Recorder:
 
         self.streaming = False
 
-        if self.process and self.process.poll() is None:
-            self.process.terminate()
+        if self.stream_process and self.stream_process.poll() is None:
+            self.stream_process.terminate()
             try:
-                self.process.wait(timeout=5)
+                self.stream_process.wait(timeout=5)
             except subprocess.TimeoutExpired:
-                self.process.kill()
-                self.process.wait()
+                self.stream_process.kill()
+                self.stream_process.wait()
 
         self.send_response(kwargs, {"status": "OK", "message": "Streaming Stopped"})
 
@@ -409,8 +382,17 @@ class Recorder:
         {"command":"XON","message":"Started Streaming","serial":"12","status":"OK"}
         """
         self.logger.debug("XON called")
+        self.send_response(kwargs, {"status": "OK",
+                                    "message": "Started Streaming"})
+        self.variables['XONCOUNT'] += 1
+
+        xon_cmd = self.config.get('XON', {}).get('COMMAND', '')
+        xon_cmd = self.channel_override("XON", xon_cmd)
+        if xon_cmd:
+            self.xon_process = self._execute_command(xon_cmd, "XON",
+                                                     background=False)
+
         self.xon_state = True
-        self.send_response(kwargs, {"status": "OK", "message": "Started Streaming"})
 
     def xoff(self, **kwargs) -> None:
         """Handle XOFF command."""
@@ -419,17 +401,18 @@ class Recorder:
         """
         self.logger.debug("XOFF called")
         self.xon_state = False
-        self.send_response(kwargs, {"status": "OK", "message": "Stopped Streaming"})
+        self.send_response(kwargs, {"status": "OK",
+                                    "message": "Stopped Streaming"})
 
     def _read_stderr(self) -> None:
-        """Read stderr from the subprocess and send status messages."""
-        while self.streaming and self.process:
+        """Read stderr from the stream subprocess and send status messages."""
+        while self.streaming and self.stream_process:
             try:
                 # Read stderr line by line
-                line = self.process.stderr.readline()
+                line = self.stream_process.stderr.readline()
                 if not line:
                     # Check if process is still running
-                    if self.process.poll() is not None:
+                    if self.stream_process.poll() is not None:
                         break
                     continue
 
@@ -481,17 +464,13 @@ class Recorder:
             self.logger.error("No command specified for streaming")
             return
 
-        if self.dry_run:
-            self.logger.info(f"[DRY RUN] Would execute: {self.command}")
-            return
-
         self.logger.info(f"Starting streaming with command: {self.command}")
 
         try:
             # Split command into args for subprocess
             cmd_args = shlex.split(self.command)
             self.logger.info(f"Splitting command into args: {cmd_args}")
-            self.process = subprocess.Popen(
+            self.stream_process = subprocess.Popen(
                 cmd_args,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -508,32 +487,33 @@ class Recorder:
 
             # Wait until initial data is available
             sel = selectors.DefaultSelector()
-            sel.register(self.process.stdout, selectors.EVENT_READ)
+            sel.register(self.stream_process.stdout, selectors.EVENT_READ)
             while True:
                 # Check for events (0.1s timeout so loop remains responsive)
                 events = sel.select(timeout=0.1)
-                if events or self.process.poll() is not None:
+                if events or self.stream_process.poll() is not None:
                     break
 
-            sel.unregister(self.process.stdout)
+            sel.unregister(self.stream_process.stdout)
             sel.close()
 
             if self.ondatastart_done:
                 self.logger.info("Already ran OnDataStart")
             else:
                 # Execute ondatastart command if available
-                ondatastart_cmd = dequote(self._get_ondatastart_command())
-                if ondatastart_cmd:
-                    self.logger.info(f"Executing ondatastart command: {ondatastart_cmd}")
-                    self._execute_ondatastart_command(ondatastart_cmd)
-                    self.ondatastart_done = True
+                data_cmd = self.config.get('TUNER', {}).get('ONDATASTART', "")
+                data_cmd = self.channel_override("ONSTART", data_cmd)
+                if data_cmd:
+                    self.ondatastart_process = self._execute_command(data_cmd,
+                                                                "ONDATA",
+                                                                background=True)
 
             while self.streaming:
                 # Read up to block_size at a time
-                chunk = self.process.stdout.read(self.block_size)
+                chunk = self.stream_process.stdout.read(self.block_size)
 
                 if not chunk:
-                    st = self.process.poll()
+                    st = self.stream_process.poll()
                     if st is not None:
                         if st == 0:
                             self.logger.info("Process finished normally")
@@ -553,49 +533,66 @@ class Recorder:
             self.logger.exception(f"Error during streaming: {e}")
             self.streaming = False
         finally:
-            if self.process:
-                self.process.terminate()
+            if self.stream_process:
+                self.stream_process.terminate()
                 try:
-                    self.process.wait(timeout=5)
+                    self.stream_process.wait(timeout=5)
                 except subprocess.TimeoutExpired:
-                    self.process.kill()
-                    self.process.wait()
+                    self.stream_process.kill()
+                    self.stream_process.wait()
             self.logger.info("Streaming stopped")
 
-    def _get_ondatastart_command(self) -> Optional[str]:
-        """Get the ondatastart command for the current channel."""
-
-        command = self.config.get('TUNER', {}).get('ONDATASTART', "")
-        self.logger.debug(f"ONDATASTART: generic '{command}'")
-        command = self.channel_override("ONSTART", command)
-        self.logger.debug(f"ONDATASTART: channel '{command}'")
-
-        if command:
-            command = self.replace_variables_in_string(command)
-
-        return command
-
-    def _execute_ondatastart_command(self, command: str) -> None:
-        """Execute the ondatastart command."""
+    def _execute_command(self, command: str, desc: str, background: bool) -> None:
         if not command:
-            return
+            return None
 
-        self.logger.debug(f"Executing ondatastart command: {command}")
-        # Execute in background
-        try:
-            cmd_args = shlex.split(command)
-            self.ondatastart_process = subprocess.Popen(
-                cmd_args,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE
-            )
-            self.logger.info(f"Started background ondatastart command: {command}")
-        except Exception as e:
-            self.logger.error(f"Error starting background ondatastart command: {e}")
+        command = dequote(self.replace_variables_in_string(command))
+
+        # Check if command should run in background (has trailing &)
+        ampersand = command.endswith(' &')
+        if ampersand:
+            command = command[:-2].strip()
+        background |= ampersand
+
+        if background:
+            # Execute in background
+            try:
+                cmd_args = shlex.split(command)
+                process = subprocess.Popen(
+                    cmd_args,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE
+                )
+                self.logger.info(f"Started background {desc} command: {command}")
+            except Exception as e:
+                self.logger.error(f"Error starting background {desc} command: {e}")
+                return None
+        else:
+            # Execute in foreground
+            try:
+                cmd_args = shlex.split(command)
+                process = subprocess.Popen(
+                    cmd_args,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE
+                )
+                process.wait()
+                self.logger.info(f"Completed {desc} command: {command}")
+            except Exception as e:
+                self.logger.error(f"Error executing {desc} command: {e}")
+                return None
+
+        return process
 
     def replace_variables_in_string(self, value: str) -> str:
         if not value:
             return value
+
+        """
+        self.logger.info(f"Replacing in {value}")
+        for key,data in self.variables.items():
+            self.logger.info(f"{key} : {data}")
+        """
 
         # First, handle the special blocks that need to be removed if any variables are unknown
         def replace_special_block(match):
