@@ -277,7 +277,7 @@ class Recorder:
         {"atsc_major":0,"atsc_minor":0,"callsign":"CALLSIGN","chanid":100,"channum":"100","command":"TuneChannel","description":"","duration":1923,"freqid":"","inputid":16,"mplexid":0,"name":"Station Name","programid":"","recordid":4165,"serial":9,"seriesid":"","sourceid":4,"subtitle":"Subtitle","title":"Title","value":"96"}
         """
         """ Example response:
-        {"command":"TuneChannel","message":"InProgress `/usr/local/bin/rOKu-control --device roku9 --link \"[aivod://B0D6ZCZQVH]\" --prologue amazon`","serial":"9","status":"OK"}
+        {"command":"TuneChannel","message":"InProgress `/usr/local/bin/roku-control --channum 318"`","serial":"9","status":"OK"}
         """
         self.logger.debug("TuneChannel called")
         self.logger.debug(f"Received TuneChannel message: {kwargs}")
