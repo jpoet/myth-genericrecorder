@@ -78,7 +78,10 @@ class Recorder:
             "StartStreaming"       : self.start_streaming,
             "StopStreaming"        : self.stop_streaming,
             "XON"                  : self.xon,
-            "XOFF"                 : self.xoff
+            "XOFF"                 : self.xoff,
+            "LoadChannels"         : self.load_channels,
+            "FirstChannel"         : self.first_channel,
+            "NextChannel"          : self.next_channel
         }
         self.logger.debug(f"Recorder.__init__ called with config={config}")  # Debug line
 
@@ -149,13 +152,22 @@ class Recorder:
 
     def version(self, **kwargs) -> None:
         """Handle Version? command."""
+        """ Example query:
+        {"command":"Version?","serial":2}
+        """
+        """ Example response:
+        {"command":"APIVersion","message":"3","serial":"1","status":"OK"}
+        """
         self.logger.debug("Version? called")
         self.send_response(kwargs, {"status": "OK", "message": "0.5"})
 
     def description(self, **kwargs) -> None:
         """Handle Description? command."""
+        """ Example query:
+        {"command":"Description?","serial":3}
+        """
         """ Example response:
-        {"command":"Version?","message":"2.0","serial":"3","status":"OK"}
+        {"command":"Description?","message":"mag-1-2-3","serial":"3","status":"OK"}
         """
         self.logger.debug(f"Variables:\n{self.variables}")
 
@@ -167,6 +179,9 @@ class Recorder:
 
     def has_tuner(self, **kwargs) -> None:
         """Handle HasTuner? command."""
+        """ Example query:
+        {"command":"HasTuner?","serial":4}
+        """
         """ Example response:
         {"command":"HasTuner","message":"Yes","serial":"2","status":"OK"}
         """
@@ -178,6 +193,9 @@ class Recorder:
 
     def has_picture_attributes(self, **kwargs) -> None:
         """Handle HasPictureAttributes? command."""
+        """ Example query:
+        {"command":"HasPictureAttributes?","serial":5}
+        """
         """ Example response:
         {"command":"HasPictureAttributes","message":"No","serial":"4","status":"OK"}
         """
@@ -186,6 +204,9 @@ class Recorder:
 
     def flow_control(self, **kwargs) -> None:
         """Handle FlowControl? command."""
+        """ Example query:
+        {"command":"FlowControl?","serial":6}
+        """
         """ Example response:
         {"command":"FlowControl?","message":"XON/XOFF","serial":"5","status":"OK"}
         """
@@ -194,6 +215,9 @@ class Recorder:
 
     def block_size_handler(self, **kwargs) -> None:
         """Handle BlockSize command."""
+        """ Example query:
+        {"command":"BlockSize","serial":7,"value":"3080192"}
+        """
         """ Example response:
         {"command":"BlockSize","message":"Blocksize 3080192","serial":"6","status":"OK"}
         """
@@ -202,6 +226,9 @@ class Recorder:
 
     def lock_timeout(self, **kwargs) -> None:
         """Handle LockTimeout? command."""
+        """ Example query:
+        {"command":"LockTimeout?","serial":8}
+        """
         """ Example response:
         {"command":"LockTimeout","message":"30000","serial":"8","status":"OK"}
         """
@@ -215,6 +242,12 @@ class Recorder:
 
     def signal_strength(self, **kwargs) -> None:
         """Handle SignalStrengthPercent? command."""
+        """ Example query:
+        {"command":"SignalStrengthPercent?","serial":11}
+        """
+        """ Example response:
+        {"command":"SignalStrengthPercent?","serial":11}
+        """
 
         self.logger.debug("SignalStrengthPercent? called")
         if self.tune_status == "InProgress":
@@ -227,6 +260,12 @@ class Recorder:
 
     def has_lock(self, **kwargs) -> None:
         """Handle SignalStrengthPercent? command."""
+        """ Example query:
+        {"command":"HasLock?","serial":12}
+        """
+        """ Example response:
+        {"command":"HasLock?","serial":12}
+        """
 
         self.logger.debug("SignalStrengthPercent? called")
         msg = "Yes" if self.tune_status == "Tuned" else "No"
@@ -234,6 +273,9 @@ class Recorder:
 
     def tune_channel(self, **kwargs) -> None:
         """Handle TuneChannel command."""
+        """ Example query:
+        {"atsc_major":0,"atsc_minor":0,"callsign":"CALLSIGN","chanid":100,"channum":"100","command":"TuneChannel","description":"","duration":1923,"freqid":"","inputid":16,"mplexid":0,"name":"Station Name","programid":"","recordid":4165,"serial":9,"seriesid":"","sourceid":4,"subtitle":"Subtitle","title":"Title","value":"96"}
+        """
         """ Example response:
         {"command":"TuneChannel","message":"InProgress `/usr/local/bin/rOKu-control --device roku9 --link \"[aivod://B0D6ZCZQVH]\" --prologue amazon`","serial":"9","status":"OK"}
         """
@@ -276,37 +318,11 @@ class Recorder:
             "message": f"InProgress `{tune_cmd}`"
         })
 
-    def _monitor_tune_completion(self) -> None:
-        """Monitor tune command completion."""
-        if not self.tune_process:
-            return
-
-        try:
-            self.tune_process.wait()
-            self.tune_status = "Tuned"
-            self.logger.info("Tune command completed successfully")
-        except Exception as e:
-            self.logger.error(f"Error monitoring tune completion: {e}")
-            self.tune_status = "Error"
-
-    def tune_status_handler(self, **kwargs) -> None:
-        """Handle TuneStatus? command."""
-        self.logger.debug("TuneStatus? called")
-
-        if self.tune_status == "InProgress":
-            message = "InProgress"
-        elif self.tune_status == "Tuned":
-            message = "Tuned"
-        else:
-            message = "Idle"
-
-        self.send_response(kwargs,
-                           {"status": "OK",
-                            "message": message}
-                           )
-
     def close_recorder(self, **kwargs) -> None:
         """Handle CloseRecorder command."""
+        """ Example query:
+        {"command":"CloseRecorder","serial":18}
+        """
         """ Example response:
         {"command":"CloseRecorder","message":"Terminating","serial":"9","status":"OK"}
         """
@@ -316,12 +332,23 @@ class Recorder:
         sys.exit(0)
 
     def is_open(self, **kwargs) -> None:
+        """Handle IsOpen? command."""
+        """ Example query:
+        {"command":"IsOpen?","serial":13}
+        """
+        """ Example response:
+        {"command":"IsOpen?","message":"Not Open yet","serial":"13","status":"WARN"}
+        """
+
         self.logger.debug("IsOpen? called")
         msg = "Open" if self.stream_process else "No"
         self.send_response(kwargs, {"status": "OK", "message": msg})
 
     def start_streaming(self, **kwargs) -> None:
         """Handle StartStreaming command."""
+        """ Example query:
+        {"command":"StartStreaming","serial":14}
+        """
         """ Example response:
         {"command":"StartStreaming","message":"Streaming Started","serial":"11","status":"OK"}
         """
@@ -354,6 +381,9 @@ class Recorder:
 
     def stop_streaming(self, **kwargs) -> None:
         """Handle StopStreaming command."""
+        """ Example query:
+        {"command":"StopStreaming","serial":17}
+        """
         """ Example response:
         {"command":"StopStreaming","message":"Streaming Stopped","serial":"12","status":"OK"}
         """
@@ -378,6 +408,9 @@ class Recorder:
 
     def xon(self, **kwargs) -> None:
         """Handle XON command."""
+        """ Example query:
+        {"command":"XON","serial":15}
+        """
         """ Example response:
         {"command":"XON","message":"Started Streaming","serial":"12","status":"OK"}
         """
@@ -396,6 +429,9 @@ class Recorder:
 
     def xoff(self, **kwargs) -> None:
         """Handle XOFF command."""
+        """ Example query:
+        {"command":"XOFF","serial":16}
+        """
         """ Example response:
         {"command":"XOFF","message":"Stopped Streaming","serial":"13","status":"OK"}
         """
@@ -403,6 +439,65 @@ class Recorder:
         self.xon_state = False
         self.send_response(kwargs, {"status": "OK",
                                     "message": "Stopped Streaming"})
+
+    def load_channels(self, **kwargs) -> None:
+        """Handle LoadChannels command."""
+        """ Example query:
+        {"command":"LoadChannels","serial":19}
+        """
+        """ Example response:
+        {"command":"LoadChannels","message":"52","serial":"19","status":"OK"}
+        """
+        self.logger.debug("LoadChannels called")
+
+    def first_channel(self, **kwargs) -> None:
+        """Handle FirstChannel command."""
+        """ Example query:
+        {"command":"FirstChannel","serial":20}
+        """
+        """ Example response:
+        {"command":"FirstChannel","message":"ChanNum,ChanName,Callsign,xmltvid,icon","serial":"20","status":"OK"}
+        """
+        self.logger.debug("FirstChannel called")
+
+    def next_channel(self, **kwargs) -> None:
+        """Handle NextChannel command."""
+        """ Example query:
+        {"command":"NextChannel","serial":21}
+        """
+        """ Example response:
+        {"command":"NextChannel","message":"ChanNum,ChanName,Callsign,xmltvid,icon","serial":"21","status":"OK"}
+        """
+        self.logger.debug("NextChannel called")
+
+    def _monitor_tune_completion(self) -> None:
+        """Monitor tune command completion."""
+        if not self.tune_process:
+            return
+
+        try:
+            self.tune_process.wait()
+            self.tune_status = "Tuned"
+            self.logger.info("Tune command completed successfully")
+        except Exception as e:
+            self.logger.error(f"Error monitoring tune completion: {e}")
+            self.tune_status = "Error"
+
+    def tune_status_handler(self, **kwargs) -> None:
+        """Handle TuneStatus? command."""
+        self.logger.debug("TuneStatus? called")
+
+        if self.tune_status == "InProgress":
+            message = "InProgress"
+        elif self.tune_status == "Tuned":
+            message = "Tuned"
+        else:
+            message = "Idle"
+
+        self.send_response(kwargs,
+                           {"status": "OK",
+                            "message": message}
+                           )
 
     def _read_stderr(self) -> None:
         """Read stderr from the stream subprocess and send status messages."""

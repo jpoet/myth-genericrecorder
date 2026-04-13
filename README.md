@@ -54,28 +54,56 @@ APIVersion?
 {"command":"XOFF","serial":16}
 {"command":"StopStreaming","serial":17}
 {"command":"CloseRecorder","serial":18}
+{"command":"LoadChannels","serial":19}
+{"command":"FirstChannel","serial":20}
+{"command":"NextChannel","serial":21}
 ```
 
 ## Command Reference
 
-- `APIVersion?`: Returns API version information this program wants to use.
-- `APIVersion` : Specifies the API version to use
-- `Version?`: Returns version information
-- `Description?`: Returns description information
-- `HasTuner?`: Returns tuner availability
-- `HasPictureAttributes?`: Returns picture attributes availability
-- `FlowControl?`: Returns flow control information
-- `BlockSize`: Sets the block (data chunk) size
-- `LockTimeout?`: Returns lock timeout information
-- `TuneChannel`: Requests the a "channel" be tuned using the provided data.
-- `SignalStrengthPercent?`: Returns the signal strength
-- `HasLock?": Returns if the Channel has been tuned.
-- `IsOpen?": Returns if the program specified in the config file is running.
-- `CloseRecorder`: Closes the recorder
-- `StartStreaming`: Starts streaming with external command
-- `StopStreaming`: Stops streaming
-- `XON`: Starts data flowing
-- `XOFF`: Stops the flow of data (packets from external command are discarded)
+- `APIVersion?`: Returns API version information this program wants to use. This is the only query/response not in JSON format:
+  "OK:3"
+- `APIVersion` : Specifies the API version to use:
+  {"command":"APIVersion","message":"3","serial":"1","status":"OK"}
+- `Version?`: Returns version information:
+  {"command":"APIVersion","serial":1,"value":"3"}
+- `Description?`: Returns description information:
+  {"command":"Description?","message":"mag-1-2-3","serial":"3","status":"OK"}
+- `HasTuner?`: Returns tuner availability:
+  {"command":"HasTuner","message":"Yes","serial":"2","status":"OK"}
+- `HasPictureAttributes?`: Returns picture attributes availability:
+  {"command":"HasPictureAttributes","message":"No","serial":"4","status":"OK"}
+- `FlowControl?`: Returns flow control information:
+  {"command":"FlowControl?","message":"XON/XOFF","serial":"5","status":"OK"}
+- `BlockSize`: Sets the block (data chunk) size:
+  {"command":"BlockSize","message":"Blocksize 3080192","serial":"6","status":"OK"}
+- `LockTimeout?`: Returns lock timeout information:
+  {"command":"LockTimeout","message":"30000","serial":"8","status":"OK"}
+- `TuneChannel`: Requests the a "channel" be tuned using the provided data:
+  {"command":"TuneChannel","message":"InProgress `/usr/local/bin/rOKu-control --device roku9 --link \"[aivod://B0D6ZCZQVH]\" --prologue amazon`","serial":"9","status":"OK"}
+- `SignalStrengthPercent?`: Returns the signal strength:
+  {"command":"SignalStrengthPercent?","serial":11}
+- `HasLock?`: Returns if the Channel has been tuned:
+  {"command":"HasLock?","message":"No","serial":"12","status":"OK"}
+- `IsOpen?`: Returns if the program specified in the config file is running:
+  {"command":"IsOpen?","message":"Not Open yet","serial":"13","status":"WARN"}
+- `CloseRecorder`: Closes the recorder:
+  {"command":"CloseRecorder","message":"Terminating","serial":"9","status":"OK"}
+- `StartStreaming`: Starts streaming with external command:
+  {"command":"StartStreaming","message":"Streaming Started","serial":"11","status":"OK"}
+- `StopStreaming`: Stops streaming:
+  {"command":"StopStreaming","message":"Streaming Stopped","serial":"12","status":"OK"}
+- `XON`: Starts data flowing:
+  {"command":"XON","message":"Started Streaming","serial":"12","status":"OK"}
+- `XOFF`: Stops the flow of data (packets from external command are discarded):
+  {"command":"XOFF","message":"Stopped Streaming","serial":"13","status":"OK"}
+- `LoadChannels`: Returns the number of channels defined in [TUNER]/channels:
+  {"command":"LoadChannels","message":"52","serial":"19","status":"OK"}
+- `FirstChannel`: Returns first channel (channum, name, callsign, xmltvid, icon) defined in [TUNER]/channels:
+  {"command":"FirstChannel","message":"ChanNum,ChanName,Callsign,xmltvid,icon","serial":"20","status":"OK"}
+- `NextChannel`: Returns next channel (channum, name, callsign, xmltvid, icon) defined in [TUNER]/channels:
+  {"command":"NextChannel","message":"ChanNum,ChanName,Callsign,xmltvid,icon","serial":"21","status":"OK"}
+
 
 ## Requirements
 
