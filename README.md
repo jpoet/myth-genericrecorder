@@ -80,7 +80,7 @@ APIVersion?
 - `LockTimeout?`: Returns lock timeout information:<br>
   `{"command":"LockTimeout","message":"30000","serial":"8","status":"OK"}`
 - `TuneChannel`: Requests the a "channel" be tuned using the provided data:<br>
-  `{"command":"TuneChannel","message":"InProgress \`/usr/local/bin/roku-control --device roku9 --channum 318"\`","serial":"9","status":"OK"}`
+  ``{"command":"TuneChannel","message":"InProgress `/usr/local/bin/roku-control --device roku9 --channum 318`","serial":"9","status":"OK"}``
 - `SignalStrengthPercent?`: Returns the signal strength:<br>
   `{"command":"SignalStrengthPercent?","serial":11}`
 - `HasLock?`: Returns if the Channel has been tuned:<br>

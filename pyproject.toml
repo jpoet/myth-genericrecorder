@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools>=61.0", "wheel"]
+requires = ["setuptools>=64", "setuptools_scm>=8"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "myth-genericrecorder"
-version = "0.1.0"
+dynamic = ["version"]
 description = "MythTV Generic recorder that processes JSON commands and executes external commands"
 requires-python = ">=3.8"
 dependencies = [
@@ -22,3 +22,8 @@ myth-genericrecorder = "myth_genericrecorder.main:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["myth_genericrecorder*"]
+
+[tool.setuptools_scm]
+# Presence of this section enables setuptools_scm.
+# It will use the latest git tag and append the commit hash if the repo is 'dirty'
+# or has commits since the last tag.

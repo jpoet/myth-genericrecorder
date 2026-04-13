@@ -39,7 +39,7 @@ class Recorder:
 
         # Configuration
         self.config    = config or {}
-        self.variables = variables
+        self.variables = variables or {}
 
         """
         if variables is not None:
@@ -159,7 +159,7 @@ class Recorder:
         {"command":"APIVersion","message":"3","serial":"1","status":"OK"}
         """
         self.logger.debug("Version? called")
-        self.send_response(kwargs, {"status": "OK", "message": "0.5"})
+        self.send_response(kwargs, {"status": "OK", "message": __version__})
 
     def description(self, **kwargs) -> None:
         """Handle Description? command."""

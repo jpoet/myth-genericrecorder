@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """Main module for myth-genericrecorder program."""
+from importlib.metadata import version
+
 import argparse
 import json
 import logging
@@ -67,6 +69,11 @@ Usage examples:
         help="MythTV verbose categories (ignored)",
         type=str,
         required=False
+    )
+    parser.add_argument(
+        "--version",
+        action="store_true",
+        help="Program version"
     )
     parser.add_argument(
         "--loglevel",
@@ -183,6 +190,12 @@ def main():
     """Main entry point."""
     args = parse_arguments()
     variables = None
+
+    __version__ = version("myth-genericrecorder")
+
+    if args.version:
+        print(__version__)
+        sys.exit(0)
 
     # Setup logging
     if args.logpath:
