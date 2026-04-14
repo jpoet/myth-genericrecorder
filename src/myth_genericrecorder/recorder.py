@@ -532,26 +532,34 @@ class Recorder:
             # Determine status based on message prefix (case insensitive)
             status = "INFO"
             message = line
-
+            if line.lower().startswith("crit"):
+                status = "CRIT"
+                prefix, sep, message = line.partition(':')
             if line.lower().startswith("err"):
                 status = "ERR"
-                message = line[3:].strip()
+                prefix, sep, message = line.partition(':')
             elif line.lower().startswith("warn"):
                 status = "WARN"
-                message = line[4:].strip()
+                prefix, sep, message = line.partition(':')
             elif line.lower().startswith("damage"):
                 status = "DAMAGED"
-                message = line[6:].strip()
+                prefix, sep, message = line.partition(':')
             elif line.lower().startswith("info"):
                 status = "INFO"
-                message = line[4:].strip()
+                prefix, sep, message = line.partition(':')
+            elif line.lower().startswith("debug"):
+                status = "DEBUG"
+                prefix, sep, message = line.partition(':')
+            elif line.lower().startswith("trace"):
+                status = "TRACE"
+                prefix, sep, message = line.partition(':')
 
             # Send status message
             response = {
-                "message": message,
+                "message": message.strip(),
                 "status": status
             }
-            self.send_response({"command": "status"}, response)
+            self.send_response({"command": "STATUS"}, response)
 
         except Exception as e:
             self.logger.error(f"Error processing stderr line '{line}': {e}")
