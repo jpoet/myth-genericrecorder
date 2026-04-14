@@ -12,6 +12,9 @@ import shlex
 import re
 import selectors
 
+from importlib.metadata import version
+__version__ = version("myth-genericrecorder")
+
 class Recorder:
     """Recorder class to handle streaming and command execution."""
 
