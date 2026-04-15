@@ -39,6 +39,7 @@ class Recorder:
         self.ondatastart_done    = False
         self.tune_thread         = None
         self.tune_status         = "Idle"  # Idle, InProgress, Tuned
+        self.processes           = {}
 
         # Configuration
         self.config    = config or {}
@@ -88,6 +89,21 @@ class Recorder:
         }
         self.logger.debug(f"Recorder.__init__ called with config={config}")  # Debug line
 
+    def __del__(self):
+        # Terminate when the object is destroyed
+        if self.streaming:
+            self.stop_streaming()
+
+        for key,proc in self.processes.items():
+            if proc['process'] and proc['process'].poll() is None:
+                self.logger.info(f"Force terminating {key} process {proc['process'].pid}")
+                try:
+                    proc['process'].terminate()
+                    proc['process'].wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    proc['process'].kill()
+                    proc['process'].wait()
+
     def process_command(self, message: Dict[str, Any]) -> None:
         """Process a command from stdin."""
         command = message.get("command", "")
@@ -95,10 +111,7 @@ class Recorder:
             self.logger.warning("No command in message")
             return
 
-        # Clean command name (remove invalid characters)
-        clean_command = "".join(c for c in command if c.isalnum() or c in "_?")
-
-        if clean_command not in self.handlers:
+        if command not in self.handlers:
             self.logger.warning(f"Unknown command: {command}")
             self.send_response(message, {"status": "error", "message": "Unknown command"})
             return
@@ -106,14 +119,14 @@ class Recorder:
         try:
             # Execute the handler
             self.logger.debug(f"Executing handler for command: {command}")
-            handler = self.handlers[clean_command]
+            handler = self.handlers[command]
             handler(**message)
         except Exception as e:
             self.logger.exception(f"Error executing command {command}: {e}")
             self.send_response(message, {"status": "error", "message": str(e)})
 
     def send_response(self, original_message: Dict[str, Any],
-                     response_data: Dict[str, Any]) -> None:
+                      response_data: Dict[str, Any], level: int = logging.INFO) -> None:
         """Send a JSON response to stderr."""
         keep_keys = ["command", "serial"]
         response = {key: original_message[key] for key in keep_keys
@@ -125,7 +138,7 @@ class Recorder:
             json.dump(response, sys.stderr)
             sys.stderr.write("\n")
             sys.stderr.flush()
-            self.logger.debug(f"Sent response: {response}")
+            self.logger.log(level, f"Response: {response}")
         except Exception as e:
             self.logger.error(f"Failed to send response: {e}")
 
@@ -138,12 +151,12 @@ class Recorder:
             return default
 
         if 'CHANNELS' in self.config:
-            self.logger.info(f"Looking for {channum} in "
-                             f"{self.config['TUNER']['CHANNELS']}")
+            self.logger.debug(f"Looking for {channum} in "
+                              f"{self.config['TUNER']['CHANNELS']}")
             channel_config = self.config['CHANNELS'].get(channum, {})
             if variable in channel_config:
                 value = channel_config[variable]
-                self.logger.info(f"Using channel-specific {variable}={value}")
+                self.logger.info(f"Using channel[{channum}] specific {variable}={value}")
                 return value
         return default
 
@@ -253,13 +266,19 @@ class Recorder:
         """
 
         self.logger.debug("SignalStrengthPercent? called")
-        if self.tune_status == "InProgress":
-            msg = "25"
-        elif self.tune_status == "Idle":
-            msg = "0";
+        if ('Tune' not in self.processes or
+            self.processes['Tune'] is None or
+            self.processes['Tune']['process'] is None):
+            message = "0"
         else:
-            msg = "100";
-        self.send_response(kwargs, {"status": "OK", "message": msg})
+            status = self.processes['Tune']['status']
+            if status == "InProgress":
+                message = "25"
+            elif status == "Finished":
+                message = "100"
+            else:
+                message = "0"
+        self.send_response(kwargs, {"status": "OK", "message": message})
 
     def has_lock(self, **kwargs) -> None:
         """Handle SignalStrengthPercent? command."""
@@ -271,8 +290,14 @@ class Recorder:
         """
 
         self.logger.debug("SignalStrengthPercent? called")
-        msg = "Yes" if self.tune_status == "Tuned" else "No"
-        self.send_response(kwargs, {"status": "OK", "message": msg})
+        if ('Tune' not in self.processes or
+            self.processes['Tune'] is None or
+            self.processes['Tune']['process'] is None):
+            message = "No"
+        else:
+            status = self.processes['Tune']['status']
+            message = "Yes" if status == "Finished" else "No"
+        self.send_response(kwargs, {"status": "OK", "message": message})
 
     def tune_channel(self, **kwargs) -> None:
         """Handle TuneChannel command."""
@@ -285,13 +310,13 @@ class Recorder:
         self.logger.debug("TuneChannel called")
         self.logger.debug(f"Received TuneChannel message: {kwargs}")
 
-        if self.tune_status != "Idle":
-            self.tune_process.kill()
-            self.tune_process.wait()
-            self.tune_status = "Idle";
-
         # Update variables with message data
+        """
+        for key, value in kwargs.items():
+            self.logger.warn(f"{key}: {value}")
+        """
         self.process_variables_in_message(kwargs)
+
         # Get the tune command from config
         tune_cmd = self.config.get('TUNER', {}).get('COMMAND', '')
         tune_cmd = self.channel_override("TUNE", tune_cmd)
@@ -301,20 +326,13 @@ class Recorder:
 
         if not tune_cmd:
             self.send_response(kwargs,
-                               {
-                "status": "error",
-                "message": "No tune command provided"
-            })
+                               {"status": "error",
+                                "message": "No tune command provided"
+                                })
             return
 
-        self.tune_status = "InProgress"
-        self.tune_process = self._execute_command(tune_cmd, "tune",
-                                                  background=True)
-
-        # Start thread to monitor completion
-        self.tune_thread = threading.Thread(target=self._monitor_tune_completion)
-        self.tune_thread.daemon = True
-        self.tune_thread.start()
+        tune_cmd = self._execute_command(tune_cmd, "Tune",
+                                         background=True)
 
         self.send_response(kwargs, {
             "status": "OK",
@@ -363,8 +381,6 @@ class Recorder:
             self.send_response(kwargs, {"status": "error", "message": "Already streaming"})
             return
 
-        self.logger.warning(f"RECORDER/command: {self.config['RECORDER']}")
-
         # Replace variables in the command
         if self.config["RECORDER"]["COMMAND"] is None:
             self.logger.warning("No [RECORDER/command] specified")
@@ -373,8 +389,6 @@ class Recorder:
             return
 
         self.command = dequote(self.replace_variables_in_string(self.config["RECORDER"]["COMMAND"]))
-        self.logger.info(f"Final streaming command after variable replacement: {self.command}")
-
         self.streaming = True
         self.stream_thread = threading.Thread(target=self._stream_loop)
         self.stream_thread.daemon = True
@@ -425,8 +439,7 @@ class Recorder:
         xon_cmd = self.config.get('XON', {}).get('COMMAND', '')
         xon_cmd = self.channel_override("XON", xon_cmd)
         if xon_cmd:
-            self.xon_process = self._execute_command(xon_cmd, "XON",
-                                                     background=False)
+            self._execute_command(xon_cmd, "XON", background=False)
 
         self.xon_state = True
 
@@ -473,33 +486,27 @@ class Recorder:
         """
         self.logger.debug("NextChannel called")
 
-    def _monitor_tune_completion(self) -> None:
-        """Monitor tune command completion."""
-        if not self.tune_process:
-            return
-
-        try:
-            self.tune_process.wait()
-            self.tune_status = "Tuned"
-            self.logger.info("Tune command completed successfully")
-        except Exception as e:
-            self.logger.error(f"Error monitoring tune completion: {e}")
-            self.tune_status = "Error"
-
     def tune_status_handler(self, **kwargs) -> None:
         """Handle TuneStatus? command."""
         self.logger.debug("TuneStatus? called")
 
-        if self.tune_status == "InProgress":
-            message = "InProgress"
-        elif self.tune_status == "Tuned":
-            message = "Tuned"
-        else:
+        if ('Tune' not in self.processes or
+            self.processes['Tune'] is None or
+            self.processes['Tune']['process'] is None):
             message = "Idle"
+        else:
+            status = self.processes['Tune']['status']
+            if status == "InProgress":
+                message = "InProgress"
+            elif status == "Finished":
+                message = "Tuned"
+            else:
+                message = "Idle"
 
         self.send_response(kwargs,
                            {"status": "OK",
-                            "message": message}
+                            "message": message},
+                           logging.DEBUG
                            )
 
     def _read_stderr(self) -> None:
@@ -532,37 +539,53 @@ class Recorder:
             # Determine status based on message prefix (case insensitive)
             status = "INFO"
             message = line
+            level = logging.INFO
             if line.lower().startswith("crit"):
                 status = "CRIT"
+                level = logging.CRITICAL
                 prefix, sep, message = line.partition(':')
             if line.lower().startswith("err"):
                 status = "ERR"
+                level = logging.ERR
                 prefix, sep, message = line.partition(':')
             elif line.lower().startswith("warn"):
                 status = "WARN"
+                level = logging.WARN
                 prefix, sep, message = line.partition(':')
             elif line.lower().startswith("damage"):
                 status = "DAMAGED"
+                level = logging.WARN
                 prefix, sep, message = line.partition(':')
             elif line.lower().startswith("info"):
                 status = "INFO"
+                level = logging.INFO
                 prefix, sep, message = line.partition(':')
             elif line.lower().startswith("debug"):
                 status = "DEBUG"
+                level = logging.DEBUG
                 prefix, sep, message = line.partition(':')
             elif line.lower().startswith("trace"):
                 status = "TRACE"
+                level = logging.TRACE
                 prefix, sep, message = line.partition(':')
+
+            if len(message) == 0:
+                message = prefix
+
+            # If the message has 'LEVEL: MSG', then we have stripped
+            # the 'LEVEL:', but there still may be an unwanted space.
+            if message[0] == ' ':
+                message = message[1:]
 
             # Send status message
             response = {
-                "message": message.strip(),
+                "message": message,
                 "status": status
             }
-            self.send_response({"command": "STATUS"}, response)
+            self.send_response({"command": "STATUS"}, response, level)
 
         except Exception as e:
-            self.logger.error(f"Error processing stderr line '{line}': {e}")
+            self.logger.exception(f"Error processing stderr line '{line}': {e}")
 
     def _stream_loop(self) -> None:
         """Main streaming loop."""
@@ -570,12 +593,12 @@ class Recorder:
             self.logger.error("No command specified for streaming")
             return
 
-        self.logger.info(f"Starting streaming with command: {self.command}")
+        self.logger.info(f"Starting streaming: {self.command}")
 
         try:
             # Split command into args for subprocess
             cmd_args = shlex.split(self.command)
-            self.logger.info(f"Splitting command into args: {cmd_args}")
+            self.logger.debug(f"Splitting command into args: {cmd_args}")
             self.stream_process = subprocess.Popen(
                 cmd_args,
                 stdout=subprocess.PIPE,
@@ -610,9 +633,9 @@ class Recorder:
                 data_cmd = self.config.get('TUNER', {}).get('ONDATASTART', "")
                 data_cmd = self.channel_override("ONSTART", data_cmd)
                 if data_cmd:
-                    self.ondatastart_process = self._execute_command(data_cmd,
-                                                                "ONDATA",
-                                                                background=True)
+                    self._execute_command(data_cmd,
+                                          "ONDATA",
+                                          background=False)
 
             while self.streaming:
                 # Read up to block_size at a time
@@ -648,16 +671,28 @@ class Recorder:
                     self.stream_process.wait()
             self.logger.info("Streaming stopped")
 
-    def _execute_command(self, command: str, desc: str, background: bool) -> None:
+    def _execute_command(self, command: str, desc: str,
+                         background: bool) -> str:
         if not command:
             return None
+
+        if desc in self.processes and self.processes[desc]['status'] != "Idle":
+            proc = self.processes[desc]
+            self.logger.info(f"Force terminating {desc} process {proc['process'].pid}")
+            try:
+                proc['process'].terminate()
+                proc['process'].wait(timeout=1)
+            except subprocess.TimeoutExpired:
+                proc['process'].kill()
+                proc['process'].wait()
+            self.processes[desc]['status'] = "Idle"
 
         command = dequote(self.replace_variables_in_string(command))
 
         # Check if command should run in background (has trailing &)
-        ampersand = command.endswith(' &')
+        ampersand = command.endswith('&')
         if ampersand:
-            command = command[:-2].strip()
+            command = command[:-1].strip()
         background |= ampersand
 
         if background:
@@ -669,7 +704,16 @@ class Recorder:
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE
                 )
-                self.logger.info(f"Started background {desc} command: {command}")
+                self.logger.info(f"Started background {desc} command ({process.pid}): {command}")
+
+                monitor_thread = threading.Thread(target=self._monitor_process, args=(desc,))
+                self.processes[desc] = {'process' : process,
+                                        'command' : command,
+                                        'status' : 'InProgress',
+                                        'monitor' : monitor_thread}
+                monitor_thread.daemon = True
+                monitor_thread.start()
+
             except Exception as e:
                 self.logger.error(f"Error starting background {desc} command: {e}")
                 return None
@@ -683,12 +727,52 @@ class Recorder:
                     stderr=subprocess.PIPE
                 )
                 process.wait()
-                self.logger.info(f"Completed {desc} command: {command}")
+
+                ret = process.returncode
+                if ret == 0:
+                    msg = f"`{command}` completed succesfully"
+                    level = logging.INFO
+                    status = "OK"
+                else:
+                    msg = f"`{command}` completed with code {ret}"
+                    level = logging.WARN
+                    status = "WARN"
+                response = {"message" : msg, "status": status}
+                self.send_response({"command": "STATUS"}, response, level)
+
             except Exception as e:
                 self.logger.error(f"Error executing {desc} command: {e}")
                 return None
 
-        return process
+        return command
+
+    def _monitor_process(self, op) -> None:
+        """Monitor process completion."""
+        if op not in self.processes:
+            return
+        if self.processes[op] is None:
+            return
+        if self.processes[op]['process'] is None:
+            return
+
+        command = self.processes[op]['command']
+        try:
+            self.processes[op]['process'].wait()
+            self.processes[op]['status'] = "Finished"
+            ret = self.processes[op]['process'].returncode
+            if ret == 0:
+                msg = f"`{command}` completed succesfully"
+                level = logging.INFO
+                status = "OK"
+            else:
+                msg = f"`{command}` completed with code {ret}"
+                level = logging.WARN
+                status = "WARN"
+            response = {"message" : msg, "status": status}
+            self.send_response({"command": "STATUS"}, response, level)
+        except Exception as e:
+            self.processes[op]["status"] = "Error"
+            self.logger.exception(f"Error monitoring {op} completion: {e}")
 
     def replace_variables_in_string(self, value: str) -> str:
         if not value:

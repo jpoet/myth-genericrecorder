@@ -264,7 +264,6 @@ def main():
 
     except KeyboardInterrupt:
         logger.info("Received interrupt signal")
-        recorder.stop_streaming()
         sys.exit(0)
     except Exception as e:
         logger.error("Unexpected error in main loop")
