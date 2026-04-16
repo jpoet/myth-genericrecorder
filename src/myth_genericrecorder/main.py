@@ -14,7 +14,7 @@ from typing import Dict, Any, Optional
 import configparser
 import re
 
-from myth_genericrecorder.recorder import Recorder
+from myth_genericrecorder.recorder import Recorder, replace_variables_in_string
 
 # Setup logging
 def setup_logging(log_file: Path, quiet: bool = True) -> None:
@@ -38,7 +38,7 @@ def setup_logging(log_file: Path, quiet: bool = True) -> None:
             },
             "file": {
                 "class": "logging.FileHandler",
-                "level": "DEBUG",
+                "level": "INFO",
                 "formatter": "standard",
                 "filename": str(log_file),
                 "mode": "a"
@@ -155,6 +155,33 @@ def parse_config_file(config_path: Path) -> Dict[str, Any]:
                 variables[key.upper()] = value
                 logging.getLogger(__name__).debug(f"Loaded variable {key} = {value}")
 
+    # Process INCLUDE section
+    if 'INCLUDE' in config:
+        include_files = config['INCLUDE']
+        for include_file in include_files:
+            include_path = Path(replace_variables_in_string(include_file, variables))
+            # Resolve relative paths relative to the main config file
+            if not include_path.is_absolute():
+                include_path = config_path.parent / include_path
+            if include_path.exists():
+                logging.getLogger(__name__).debug(f"Loading included config: {include_path}")
+                include_config = configparser.ConfigParser(allow_no_value=True)
+                include_config.read(include_path)
+
+                # Merge included config into main config
+                for section_name, section_data in include_config.items():
+                    if section_name == 'DEFAULT':
+                        continue
+                    config[section_name] = process_config_section(include_config, section_name)
+                    """
+                    if section_name not in config:
+                        config[section_name] = {}
+                    for key, value in section_data.items():
+                        config[section_name][key.upper()] = value
+                    """
+            else:
+                logging.getLogger(__name__).warning(f"Include file not found: {include_path}")
+
     # Process all sections
     processed_config = {}
     for section_name, section_data in config.items():
@@ -167,7 +194,7 @@ def parse_config_file(config_path: Path) -> Dict[str, Any]:
         channel_file = processed_config['TUNER']['CHANNELS']
         channel_path = Path(channel_file)
         if channel_path.exists():
-#            logging.getLogger(__name__).error(f"Processing channels from {channel_path}")
+            logging.getLogger(__name__).debug(f"Processing channels from {channel_path}")
             channel_config = configparser.ConfigParser(allow_no_value=True)
             channel_config.read(channel_path)
 
@@ -177,9 +204,9 @@ def parse_config_file(config_path: Path) -> Dict[str, Any]:
                 if section_name == 'DEFAULT':
                     continue
                 processed_config['CHANNELS'][section_name] = process_config_section(channel_config, section_name)
-#            logging.getLogger(__name__).error(f"Channels: {processed_config['CHANNELS']}")
+            logging.getLogger(__name__).debug(f"Channels: {processed_config['CHANNELS']}")
         else:
-#            logging.getLogger(__name__).error(f"No channels processed")
+            logging.getLogger(__name__).debug(f"No channels processed")
             processed_config['CHANNELS'] = {}
 #    else:
 #        logging.getLogger(__name__).error(f"'channels' not in {processed_config['TUNER']}")
@@ -223,7 +250,7 @@ def main():
             config, variables = parse_config_file(args.conf)
             logger.info(f"Configuration loaded from {args.conf}")
         except Exception as e:
-            logger.critical(f"Failed to load configuration: {e}")
+            logger.exception(f"Failed to load configuration: {e}")
             sys.exit(1)
 
     # Create recorder with configuration
