@@ -39,6 +39,7 @@ class Recorder:
         self.ondatastart_done    = False
         self.tune_thread         = None
         self.tune_status         = "Idle"  # Idle, InProgress, Tuned
+        self.channel_iter        = None
         self.processes           = {}
 
         # Configuration
@@ -482,8 +483,35 @@ class Recorder:
         """
         self.logger.debug("LoadChannels called")
 
-        """TODO: return a count of the channels (sections) in [TUNER/channels]"""
+        # Get channel count from CHANNELS section
+        channel_count = 0
+        if 'CHANNELS' in self.config:
+            channel_count = len(self.config['CHANNELS'])
 
+        for key,value in self.config['CHANNELS'].items():
+            self.logger.info(f"{key} : {value}")
+
+        self.send_response(kwargs, {"status": "OK", "message": str(channel_count)})
+
+    def _channel_info(self, **kwargs):
+        key = next(self.channel_iter, None)
+        if key == None:
+            return self.send_response(kwargs, {"status": "WARN", "message": "DONE"})
+
+        channel_data = self.config['CHANNELS'][key]
+
+        # Format response as comma-separated values
+        # Use channel key as ChanNum, and other fields from channel data
+        response_parts = [
+            key,
+            channel_data.get('NAME', ''),
+            channel_data.get('CALLSIGN', ''),
+            channel_data.get('XMLTVID', ''),
+            channel_data.get('ICON', '')
+        ]
+
+        response = ','.join(response_parts)
+        self.send_response(kwargs, {"status": "OK", "message": response})
 
     def first_channel(self, **kwargs) -> None:
         """Handle FirstChannel command."""
@@ -495,7 +523,13 @@ class Recorder:
         """
         self.logger.debug("FirstChannel called")
 
-        """TODO: return the first channel from the [TUNER/channels] ini file"""
+        if 'CHANNELS' not in self.config or not self.config['CHANNELS']:
+            self.send_response(kwargs, {"status": "error", "message": "No channels available"})
+            return
+
+        # Set iterator to first channel
+        self.channel_iter = iter(self.config['CHANNELS'])
+        return self._channel_info(**kwargs)
 
     def next_channel(self, **kwargs) -> None:
         """Handle NextChannel command."""
@@ -507,7 +541,11 @@ class Recorder:
         """
         self.logger.debug("NextChannel called")
 
-        """TODO: return the next channel from the [TUNER/channels] ini file"""
+        if self.channel_iter == None:
+            self.send_response(kwargs, {"status": "error", "message": "first_channel not called yet."})
+            return
+
+        return self._channel_info(**kwargs)
 
     def tune_status_handler(self, **kwargs) -> None:
         """Handle TuneStatus? command."""
