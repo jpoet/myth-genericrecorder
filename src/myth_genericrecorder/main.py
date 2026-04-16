@@ -211,6 +211,10 @@ def parse_config_file(config_path: Path) -> Dict[str, Any]:
 #    else:
 #        logging.getLogger(__name__).error(f"'channels' not in {processed_config['TUNER']}")
 
+    if logging.getLogger(__name__).isEnabledFor(logging.DEBUG):
+        for key,data in processed_config.items():
+            logging.getLogger(__name__).debug(f"{key}={data}")
+
     return processed_config, variables
 
 def main():
