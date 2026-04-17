@@ -488,8 +488,9 @@ class Recorder:
         if 'CHANNELS' in self.config:
             channel_count = len(self.config['CHANNELS'])
 
-        for key,value in self.config['CHANNELS'].items():
-            self.logger.info(f"{key} : {value}")
+        if self.logger.isEnabledFor(logging.DEBUG):
+            for key,value in self.config['CHANNELS'].items():
+                self.logger.debug(f"{key} : {value}")
 
         self.send_response(kwargs, {"status": "OK", "message": str(channel_count)})
 
