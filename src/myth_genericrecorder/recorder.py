@@ -129,7 +129,7 @@ class Recorder:
         """Send a JSON response to stderr where mythbackend will read it."""
 
         # Echo original command and serial.
-        keep_keys = ["command", "serial"]
+        keep_keys = ["command", "serial", "value"]
         response = {key: original_message[key] for key in keep_keys
                     if key in original_message}
         response.update(response_data)
@@ -139,9 +139,20 @@ class Recorder:
             json.dump(response, sys.stderr)
             sys.stderr.write("\n")
             sys.stderr.flush()
-            self.logger.log(level, f"Response: {response}")
+            if response['command'] == 'STATUS':
+                self.logger.log(level, f"{response['message']}")
+            else:
+                if 'message' in response:
+                    self.logger.log(level,
+                                    f"'{response['command']}' → '{response['message']}'")
+                elif 'value' in response:
+                    self.logger.log(level,
+                                    f"'{response['command']}' ← '{response['value']}'")
+                else:
+                    self.logger.log(level,
+                                    f"'{response['command']}'")
         except Exception as e:
-            self.logger.error(f"Failed to send response: {e}")
+            self.logger.exception(f"Failed to send response: {e}\n{response}")
 
     def channel_override(self, variable : str, default : str):
         """Check [TUNER/channel] ini file for commands and values
@@ -166,9 +177,14 @@ class Recorder:
 
     def api_version(self, **kwargs) -> None:
         """Handle APIVersion command."""
+        """ Example query:
+        {"command":"APIVersion","serial":1,"value":"3"}
+        """
+        """ Example response:
+        {"command": "APIVersion", "serial": 1, "value": "3", "status": "OK"}
+        """
         self.logger.debug("APIVersion called")
         self.send_response(kwargs, {"status": "OK"})
-#                                    "message":f"{kwargs['value']}"})
 
     def version(self, **kwargs) -> None:
         """Handle Version? command."""
