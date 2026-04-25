@@ -625,8 +625,8 @@ class Recorder:
                 level = logging.CRITICAL
                 prefix, sep, message = line.partition(':')
             if line.lower().startswith("err"):
-                status = "ERR"
-                level = logging.ERR
+                status = "ERROR"
+                level = logging.ERROR
                 prefix, sep, message = line.partition(':')
             elif line.lower().startswith("warn"):
                 status = "WARN"
@@ -893,51 +893,54 @@ def replace_variables_in_string(value: str, variables: dict) -> str:
 
     logger = logging.getLogger(__name__)
 
-    if logger.isEnabledFor(logging.DEBUG):
-        logger.debug(f"Replacing in {value}")
-        for key,data in variables.items():
-            logger.debug(f"{key} : {data}")
+    try:
+        # First, handle the special blocks that need to be removed if any variables are unknown
+        """ If '[{...}] is seen, remove that block of code unless ALL of the variables (e.g. ${VERSION})
+            are known."""
+        def replace_special_block(match):
+            block_content = match.group(1)
+            # Find all variables in the block
+            variables_in_block = re.findall(r'\$\{([^}]+)\}', block_content)
 
-    # First, handle the special blocks that need to be removed if any variables are unknown
-    """ If '[{...}] is seen, remove that block of code unless ALL of the variables (e.g. ${VERSION})
-        are known."""
-    def replace_special_block(match):
-        block_content = match.group(1)
-        # Find all variables in the block
-        variables_in_block = re.findall(r'\$\{([^}]+)\}', block_content)
-
-        # Check if all variables in the block are known and not empty
-        all_known_and_non_empty = True
-        for var_name in variables_in_block:
-            # Case insensitive lookup
-            found = False
-            for key, val in variables.items():
-                if key.lower() == var_name.lower() and val:
-                    found = True
+            # Check if all variables in the block are known and not empty
+            all_known_and_non_empty = True
+            for var_name in variables_in_block:
+                # Case insensitive lookup
+                found = False
+                for key, val in variables.items():
+                    if key.lower() == var_name.lower() and val:
+                        found = True
+                        break
+                if not found:
+                    all_known_and_non_empty = False
                     break
-            if not found:
-                all_known_and_non_empty = False
-                break
 
-        # If all variables are known and non-empty, return the block content
-        # Otherwise, return empty string (remove the block)
-        return block_content if all_known_and_non_empty else ""
+            # If all variables are known and non-empty, return the block content
+            # Otherwise, return empty string (remove the block)
+            return block_content if all_known_and_non_empty else ""
 
-    # Process special blocks first
-    processed_value = re.sub(r'\[\{([^}]*?\$\{[^}]+\}[^}]*?)\}\]', replace_special_block, value, flags=re.DOTALL)
+        # Process special blocks first
+        processed_value = re.sub(r'\[\{([^}]*?\$\{[^}]+\}[^}]*?)\}\]', replace_special_block, value, flags=re.DOTALL)
 
-    # Now replace regular variables
-    def replace_variable(match):
-        var_name = match.group(1)
-        # Case insensitive lookup
-        for key, val in variables.items():
-            if key.lower() == var_name.lower():
-                return dequote(str(val))
-        # If variable not found, leave it alone
-        return match.group(0)
+        # Now replace regular variables
+        def replace_variable(match):
+            var_name = match.group(1)
+            # Case insensitive lookup
+            for key, val in variables.items():
+                if key.lower() == var_name.lower():
+                    return dequote(str(val))
+            # If variable not found, leave it alone
+            return match.group(0)
 
-    # Replace all variables in the processed string
-    """Variables are in 'shell' style of ${VARNAME}"""
-    result = re.sub(r'\$\{([^}]+)\}', replace_variable, processed_value)
+        # Replace all variables in the processed string
+        """Variables are in 'shell' style of ${VARNAME}"""
+        result = re.sub(r'\$\{([^}]+)\}', replace_variable, processed_value)
+
+    except Exception as e:
+        logger.error(f"Replacing in {value}")
+        for key,data in variables.items():
+            logger.error(f"{key} : {data}")
+        logger.exception(f"Failed to replace variables: {e}")
+        return None
 
     return result
