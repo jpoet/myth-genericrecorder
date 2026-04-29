@@ -140,7 +140,7 @@ class Recorder:
             sys.stderr.write("\n")
             sys.stderr.flush()
             if response['command'] == 'STATUS':
-                self.logger.log(level, f"{response['message']}")
+                self.logger.log(level, f"> {response['message']}")
             else:
                 if 'message' in response:
                     self.logger.log(level,
@@ -150,7 +150,7 @@ class Recorder:
                                     f"'{response['command']}' ← '{response['value']}'")
                 else:
                     self.logger.log(level,
-                                    f"'{response['command']}'")
+                                    f"> '{response['command']}'")
         except Exception as e:
             self.logger.exception(f"Failed to send response: {e}\n{response}")
 
