@@ -469,10 +469,15 @@ class Recorder:
 
         xon_cmd = self.config.get('XON', {}).get('COMMAND', '')
         xon_cmd = self.channel_override("XON", xon_cmd)
-        if xon_cmd:
+        if xon_cmd and self.variables['XONCOUNT'] == 2:
             self._execute_command(xon_cmd, "XON", background=False)
 
         self.xon_state = True
+
+        recstart_cmd = self.config.get('RECSTART', {}).get('COMMAND', '')
+        recstart_cmd = self.channel_override("RECSTART", recstart_cmd)
+        if recstart_cmd:
+            self._execute_command(recstart_cmd, "RECSTART", background=False)
 
     def xoff(self, **kwargs) -> None:
         """Handle XOFF command."""
@@ -488,6 +493,15 @@ class Recorder:
         self.xon_state = False
         self.send_response(kwargs, {"status": "OK",
                                     "message": "Stopped Streaming"})
+
+        if self.variables['XONCOUNT'] < 2:
+            return
+
+        recstop_cmd = self.config.get('RECSTOP', {}).get('COMMAND', '')
+        recstop_cmd = self.channel_override("RECSTOP", recstop_cmd)
+        if recstop_cmd:
+            self._execute_command(recstop_cmd, "RECSTOP", background=False)
+
 
     def load_channels(self, **kwargs) -> None:
         """Handle LoadChannels command."""
