@@ -632,6 +632,8 @@ class Recorder:
             """Data may be in 'logfile' format, so handle loglevels"""
             # Determine status based on message prefix (case insensitive)
             status = "INFO"
+            prefix  = ''
+            sep     = ''
             message = line
             level = logging.INFO
             if line.lower().startswith("crit"):
@@ -647,7 +649,10 @@ class Recorder:
                 level = logging.WARN
                 prefix, sep, message = line.partition(':')
             elif line.lower().startswith("damage"):
-                status = "DAMAGED"
+                if self.xon_state:
+                    status = "DAMAGED"
+                else:
+                    status = "LOST"
                 level = logging.WARN
                 prefix, sep, message = line.partition(':')
             elif line.lower().startswith("info"):
@@ -670,6 +675,11 @@ class Recorder:
             # the 'LEVEL:', but there still may be an unwanted space.
             if message[0] == ' ':
                 message = message[1:]
+
+            if not self.xon_state and message.lower().startswith("damage"):
+                prefix, sep, message = message.partition(':')
+                if message[0] == ' ':
+                    message = message[1:]
 
             # Send status message
             response = {
