@@ -24,6 +24,6 @@ where = ["src"]
 include = ["myth_genericrecorder*"]
 
 [tool.setuptools_scm]
-# Presence of this section enables setuptools_scm.
-# It will use the latest git tag and append the commit hash if the repo is 'dirty'
-# or has commits since the last tag.
+# Presence of this section enables setuptools_scm.  It will use the
+# latest git tag and append the commit hash if the repo is 'dirty' or
+# has commits since the last tag.

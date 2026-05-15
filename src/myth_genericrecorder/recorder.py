@@ -37,6 +37,7 @@ class Recorder:
         self.tune_process        = None
         self.ondatastart_process = None
         self.ondatastart_done    = False
+        self.recorder_tunes      = False
         self.tune_thread         = None
         self.tune_status         = "Idle"  # Idle, InProgress, Tuned
         self.channel_iter        = None
@@ -222,8 +223,16 @@ class Recorder:
         {"command":"HasTuner","message":"Yes","serial":"2","status":"OK"}
         """
         self.logger.debug("HasTuner? called")
-        msg = ("Yes" if self.config['TUNER']['COMMAND'] is not None and
-               len(self.config['TUNER']['COMMAND']) > 0 else "No")
+        if ('COMMAND' in self.config['TUNER'] and
+             len(self.config['TUNER']['COMMAND']) > 0):
+            self.recorder_tunes = False
+            msg = "Yes"
+        elif ('CHANNELS' in self.config['TUNER'] and
+              len(self.config['TUNER']['CHANNELS']) > 0):
+            self.recorder_tunes = True
+            msg = "Yes"
+        else:
+            msg = "No"
         self.send_response(kwargs, {"message":f"{msg}","status":"OK"})
 
 
@@ -286,7 +295,9 @@ class Recorder:
         """
 
         self.logger.debug("SignalStrengthPercent? called")
-        if ('Tune' not in self.processes or
+        if self.recorder_tunes:
+            message = "100"
+        elif ('Tune' not in self.processes or
             # Tuner command has not been run yet.
             self.processes['Tune'] is None or
             self.processes['Tune']['process'] is None):
@@ -314,7 +325,9 @@ class Recorder:
         """
 
         self.logger.debug("SignalStrengthPercent? called")
-        if ('Tune' not in self.processes or
+        if self.recorder_tunes:
+            message = "Yes"
+        elif ('Tune' not in self.processes or
             # Tuner command has not been run yet.
             self.processes['Tune'] is None or
             self.processes['Tune']['process'] is None):
@@ -342,6 +355,13 @@ class Recorder:
                 self.logger.debug(f"{key}: {value}")
 
         self.process_variables_in_message(kwargs)
+
+        if self.recorder_tunes:
+            self.send_response(kwargs,
+                               {"status": "OK",
+                                "message": "Tuned"
+                                })
+            return
 
         # Get the tune command from config
         tune_cmd = self.config.get('TUNER', {}).get('COMMAND', '')
@@ -410,6 +430,8 @@ class Recorder:
             return
 
         # Replace variables in the command
+        self.variables['URL'] = self.channel_override("URL", "")
+
         if self.config["RECORDER"]["COMMAND"] is None:
             self.logger.warning("No [RECORDER/command] specified")
             self.send_response(kwargs, {"status": "error",
@@ -582,7 +604,9 @@ class Recorder:
         """Handle TuneStatus? command."""
         self.logger.debug("TuneStatus? called")
 
-        if ('Tune' not in self.processes or
+        if self.recorder_tunes:
+            message = "Tuned"
+        elif ('Tune' not in self.processes or
             # Tuner has not been called yet.
             self.processes['Tune'] is None or
             self.processes['Tune']['process'] is None):
@@ -819,7 +843,7 @@ class Recorder:
                 monitor_thread = threading.Thread(target=self._monitor_process, args=(desc,))
                 self.processes[desc] = {'process' : process,
                                         'command' : command,
-                                        'status' : 'InProgress',
+                                        'status'  : 'InProgress',
                                         'monitor' : monitor_thread}
                 monitor_thread.daemon = True
                 monitor_thread.start()
