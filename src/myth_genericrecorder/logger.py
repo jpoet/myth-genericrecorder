@@ -3,6 +3,7 @@ import logging
 import logging.config
 import sys
 import os
+from pathlib import Path
 
 # ==============================================================================
 # TRACE LEVEL INJECTION & LIVE PROXY
@@ -26,6 +27,18 @@ log = LiveLogger()
 # ==============================================================================
 
 def setup_logging(filename, debug=False, quiet=False, default_level='INFO'):
+    # Convert filename string to a pathlib Path object
+    log_path = Path(filename).resolve()
+
+    # Pre-flight check: Verify write permissions for the file or its parent directory
+    if log_path.exists():
+        if not os.access(log_path, os.W_OK):
+            raise PermissionError(f"Cannot write to existing log file: {log_path}")
+    else:
+        # Create missing parent directories if necessary, then check write access
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        if not os.access(log_path.parent, os.W_OK):
+            raise PermissionError(f"Cannot create log file. Write permission denied in: {log_path.parent}")
 
     # Evaluate levels from command line arguments or old flags
     if quiet:
@@ -63,7 +76,8 @@ def setup_logging(filename, debug=False, quiet=False, default_level='INFO'):
                 'level': file_level,
                 'class': "logging.handlers.RotatingFileHandler",
                 'formatter': 'standard',
-                'filename': filename,
+                # Pass the absolute path string to the handler
+                'filename': str(log_path),
                 'maxBytes': 1000000,
                 'backupCount': 5,
             },
@@ -81,6 +95,6 @@ def setup_logging(filename, debug=False, quiet=False, default_level='INFO'):
     apppath = os.path.abspath(os.path.dirname(sys.argv[0]))
     logging.config.dictConfig(dict_conf)
 
-    log.critical(f"{apppath} Logging to '{filename}' with {optstr} "
+    log.critical(f"{apppath} Logging to '{log_path}' with {optstr} "
                  f"file '{file_level}' "
                  f"console '{console_level}'")

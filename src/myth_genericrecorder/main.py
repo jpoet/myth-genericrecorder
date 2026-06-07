@@ -32,6 +32,9 @@ Usage examples:
   %(prog)s --command "streamlink twitch.tv/channel best"
         """
     )
+
+    LOG_LEVELS = ['TRACE', 'DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']
+
     parser.add_argument(
         "--verbose",
         help="MythTV verbose categories (ignored)",
@@ -44,10 +47,10 @@ Usage examples:
         help="Program version"
     )
     parser.add_argument(
-        '-l', '--log-level',
+        '-l', '--loglevel',
+        choices=LOG_LEVELS,
+        type=lambda s: s.upper(), # Folds any input to upper case
         default='INFO',
-        choices=['TRACE', 'DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
-        type=str.upper, # Automatically converts user input to uppercase
         help="Set the logging level (default: INFO)"
     )
     parser.add_argument(
@@ -211,8 +214,10 @@ def main():
     log_dir.parent.mkdir(parents=True, exist_ok=True)
     log_file = log_dir / f"myth-genericrecorder-{args.inputid}.log"
 
+    print(f"log level: {args.loglevel}")
+
     setup_logging(log_file, args.debug, args.quiet,
-                  default_level=args.log_level)
+                  default_level=args.loglevel)
     if args.debug:
         log.setLevel(logging.DEBUG)
 
