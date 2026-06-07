@@ -4,8 +4,11 @@ from importlib.metadata import version
 
 import argparse
 import json
+
+from myth_genericrecorder.logger import setup_logging, log
+#from myth_genericrecorder.logger import setup_logging
 import logging
-import logging.config
+
 import os
 import sys
 import threading
@@ -15,41 +18,6 @@ import configparser
 import re
 
 from myth_genericrecorder.recorder import Recorder, replace_variables_in_string
-
-# Setup logging
-def setup_logging(log_file: Path, quiet: bool = True) -> None:
-    """Setup logging configuration."""
-    dict_conf = {
-        "version": 1,
-        "disable_existing_loggers": False,
-        "formatters": {
-            "standard": {
-                "format": "%(asctime)s.%(msecs)-4d %(levelname)-8s "
-                          "[%(filename)s:%(lineno)d] %(message)s",
-                "datefmt": "%Y-%m-%d %H:%M:%S"
-            }
-        },
-        "handlers": {
-            "console": {
-                "class": "logging.StreamHandler",
-                "level": "INFO",
-                "formatter": "standard",
-                "stream": sys.stderr  # Always log to stderr
-            },
-            "file": {
-                "class": "logging.FileHandler",
-                "level": "INFO",
-                "formatter": "standard",
-                "filename": str(log_file),
-                "mode": "a"
-            }
-        },
-        "root": {
-            "level": "DEBUG",
-            "handlers": ["console", "file"] if not quiet else ["file"]
-        }
-    }
-    logging.config.dictConfig(dict_conf)
 
 def parse_arguments() -> argparse.Namespace:
     """Parse command line arguments."""
@@ -76,10 +44,11 @@ Usage examples:
         help="Program version"
     )
     parser.add_argument(
-        "--loglevel",
-        help="Default log level",
-        type=str,
-        required=False
+        '-l', '--log-level',
+        default='INFO',
+        choices=['TRACE', 'DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
+        type=str.upper, # Automatically converts user input to uppercase
+        help="Set the logging level (default: INFO)"
     )
     parser.add_argument(
         "--inputid",
@@ -92,11 +61,6 @@ Usage examples:
         help="External command to execute during streaming",
         type=str,
         required=False
-    )
-    parser.add_argument(
-        "--quiet",
-        action="store_true",
-        help="Suppress console output"
     )
     parser.add_argument(
         "--tune",
@@ -124,6 +88,15 @@ Usage examples:
         default=Path.home() / 'log',
         required=False
     )
+    parser.add_argument(
+        '--debug', action='store_true',
+        help='turn on debug messages (%(default)s)'
+    )
+    parser.add_argument(
+        '--quiet', action='store_true',
+        help='suppress progress messages (%(default)s)'
+    )
+
     return parser.parse_args()
 
 def process_config_section(config: configparser.ConfigParser, section_name: str) -> Dict[str, str]:
@@ -153,7 +126,7 @@ def parse_config_file(config_path: Path) -> Dict[str, Any]:
         for key, value in config['VARIABLES'].items():
             if value is not None:  # Skip keys without values
                 variables[key.upper()] = value
-                logging.getLogger(__name__).debug(f"Loaded variable {key} = {value}")
+                log.debug(f"Loaded variable {key} = {value}")
 
     # Process INCLUDE section
     if 'INCLUDE' in config:
@@ -164,7 +137,7 @@ def parse_config_file(config_path: Path) -> Dict[str, Any]:
             if not include_path.is_absolute():
                 include_path = config_path.parent / include_path
             if include_path.exists():
-                logging.getLogger(__name__).debug(f"Loading included config: {include_path}")
+                log.debug(f"Loading included config: {include_path}")
                 include_config = configparser.ConfigParser(allow_no_value=True)
                 include_config.read(include_path)
 
@@ -180,7 +153,7 @@ def parse_config_file(config_path: Path) -> Dict[str, Any]:
                         config[section_name][key.upper()] = value
                     """
             else:
-                logging.getLogger(__name__).warning(f"Include file not found: {include_path}")
+                log.warning(f"Include file not found: {include_path}")
 
     # Process all sections
     processed_config = {}
@@ -194,7 +167,7 @@ def parse_config_file(config_path: Path) -> Dict[str, Any]:
         channel_file = processed_config['TUNER']['CHANNELS']
         channel_path = Path(channel_file)
         if channel_path.exists():
-            logging.getLogger(__name__).debug(f"Processing channels from {channel_path}")
+            log.debug(f"Processing channels from {channel_path}")
             channel_config = configparser.ConfigParser(allow_no_value=True)
             channel_config.read(channel_path)
 
@@ -204,16 +177,16 @@ def parse_config_file(config_path: Path) -> Dict[str, Any]:
                 if section_name == 'DEFAULT':
                     continue
                 processed_config['CHANNELS'][section_name] = process_config_section(channel_config, section_name)
-            logging.getLogger(__name__).debug(f"Channels: {processed_config['CHANNELS']}")
+            log.trace(f"Channels: {processed_config['CHANNELS']}")
         else:
-            logging.getLogger(__name__).debug(f"No channels processed")
+            log.debug(f"No channels processed")
             processed_config['CHANNELS'] = {}
 #    else:
-#        logging.getLogger(__name__).error(f"'channels' not in {processed_config['TUNER']}")
+#        log.error(f"'channels' not in {processed_config['TUNER']}")
 
-    if logging.getLogger(__name__).isEnabledFor(logging.DEBUG):
+    if log.isEnabledFor(logging.DEBUG):
         for key,data in processed_config.items():
-            logging.getLogger(__name__).debug(f"{key}={data}")
+            log.trace(f"{key}={data}")
 
     return processed_config, variables
 
@@ -238,29 +211,29 @@ def main():
     log_dir.parent.mkdir(parents=True, exist_ok=True)
     log_file = log_dir / f"myth-genericrecorder-{args.inputid}.log"
 
-    setup_logging(log_file, args.quiet)
+    setup_logging(log_file, args.debug, args.quiet,
+                  default_level=args.log_level)
+    if args.debug:
+        log.setLevel(logging.DEBUG)
 
-    logger = logging.getLogger(__name__)
-    logger.setLevel(logging.INFO)
-
-    logger.critical("Starting myth-genericrecorder")
-    logger.debug(f"Command line arguments: {args}")
-    logger.debug(f"Log file path: {log_file}")
+    log.critical("Starting myth-genericrecorder")
+    log.debug(f"Command line arguments: {args}")
+    log.debug(f"Log file path: {log_file}")
 
     # Load configuration if provided
     config = {}
     if args.conf:
         try:
             config, variables = parse_config_file(args.conf)
-            logger.info(f"Configuration loaded from {args.conf}")
+            log.info(f"Configuration loaded from {args.conf}")
         except Exception as e:
-            logger.exception(f"Failed to load configuration: {e}")
+            log.exception(f"Failed to load configuration: {e}")
             sys.exit(1)
 
     # Create recorder with configuration
     recorder = Recorder(
         command=args.command,
-        logger=logger,
+        logger=log,
         tune_command=args.tune,
         config=config,
         variables=variables,
@@ -279,26 +252,26 @@ def main():
                     sys.stderr.write("OK:3\n")
                     continue
                 message = json.loads(line)
-                logger.debug(f"Raw JSON message: {line}")
+                log.debug(f"Raw JSON message: {line}")
 
                 # Process the command
                 recorder.process_command(message)
 
             except json.JSONDecodeError as e:
-                logger.error(f"Invalid JSON message: {line}")
-                logger.error(f"Error: {e}")
+                log.error(f"Invalid JSON message: {line}")
+                log.error(f"Error: {e}")
                 continue
             except Exception as e:
-                logger.error(f"Error processing message: {line}")
-                logger.error(f"Error details: {e}")
+                log.error(f"Error processing message: {line}")
+                log.error(f"Error details: {e}")
                 continue
 
     except KeyboardInterrupt:
-        logger.info("Received interrupt signal")
+        log.info("Received interrupt signal")
         sys.exit(0)
     except Exception as e:
-        logger.error("Unexpected error in main loop")
-        logger.error(f"Error details: {e}")
+        log.error("Unexpected error in main loop")
+        log.error(f"Error details: {e}")
         sys.exit(1)
 
 if __name__ == "__main__":

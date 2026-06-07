@@ -23,10 +23,10 @@ class Recorder:
                  tune_command: Optional[str] = None,
                  config: Optional[Dict] = None,
                  variables: Dict = None,
-                 block_size: int = 65536):
+                 block_size: int = 1048576):
         """Initialize the recorder."""
         self.command             = None
-        self.logger              = logger or logging.getLogger(__name__)
+        self.log                 = logging.getLogger(__name__)
         self.streaming           = False
         self.stream_thread       = None
         self.stderr_thread       = None
@@ -84,7 +84,7 @@ class Recorder:
             "FirstChannel"         : self.first_channel,
             "NextChannel"          : self.next_channel
         }
-        self.logger.debug(f"Recorder.__init__ called with config={config}")  # Debug line
+        self.log.trace(f"Recorder.__init__ called with config={config}")  # Debug line
 
     def __del__(self):
         # Terminate when the object is destroyed
@@ -94,7 +94,7 @@ class Recorder:
         # Kill any subprocess that is still running
         for key,proc in self.processes.items():
             if proc['process'] and proc['process'].poll() is None:
-                self.logger.info(f"Force terminating {key} process {proc['process'].pid}")
+                self.log.info(f"Force terminating {key} process {proc['process'].pid}")
                 try:
                     proc['process'].terminate()
                     proc['process'].wait(timeout=2)
@@ -107,21 +107,21 @@ class Recorder:
         """Process a command from stdin."""
         command = message.get("command", "")
         if not command:
-            self.logger.warning("No command in message")
+            self.log.warning("No command in message")
             return
 
         if command not in self.handlers:
-            self.logger.warning(f"Unknown command: {command}")
+            self.log.warning(f"Unknown command: {command}")
             self.send_response(message, {"status": "error", "message": "Unknown command"})
             return
 
         try:
             # Execute the handler
-            self.logger.debug(f"Executing handler for command: {command}")
+            self.log.debug(f"Executing handler for command: {command}")
             handler = self.handlers[command]
             handler(**message)
         except Exception as e:
-            self.logger.exception(f"Error executing command {command}: {e}")
+            self.log.exception(f"Error executing command {command}: {e}")
             self.send_response(message, {"status": "error", "message": str(e)})
 
     # Respond to mythbackend.
@@ -141,19 +141,19 @@ class Recorder:
             sys.stderr.write("\n")
             sys.stderr.flush()
             if response['command'] == 'STATUS':
-                self.logger.log(level, f"> {response['message']}")
+                self.log.log(level, f"> {response['message']}")
             else:
                 if 'message' in response:
-                    self.logger.log(level,
+                    self.log.log(level,
                                     f"'{response['command']}' → '{response['message']}'")
                 elif 'value' in response:
-                    self.logger.log(level,
+                    self.log.log(level,
                                     f"'{response['command']}' ← '{response['value']}'")
                 else:
-                    self.logger.log(level,
+                    self.log.log(level,
                                     f"> '{response['command']}'")
         except Exception as e:
-            self.logger.exception(f"Failed to send response: {e}\n{response}")
+            self.log.exception(f"Failed to send response: {e}\n{response}")
 
     def channel_override(self, variable : str, default : str):
         """Check [TUNER/channel] ini file for commands and values
@@ -161,18 +161,18 @@ class Recorder:
 
         # Get the channum from variables
         channum = self.variables.get('CHANNUM', None)
-        self.logger.debug(f"Looking for {variable} for channum {channum}")
+        self.log.debug(f"Looking for {variable} for channum {channum}")
         if not channum:
-            self.logger.debug(f"Could not determine channum for {variable}")
+            self.log.debug(f"Could not determine channum for {variable}")
             return default
 
         if 'CHANNELS' in self.config:
-            self.logger.debug(f"Looking for {channum} in "
+            self.log.debug(f"Looking for {channum} in "
                               f"{self.config['TUNER']['CHANNELS']}")
             channel_config = self.config['CHANNELS'].get(channum, {})
             if variable in channel_config:
                 value = channel_config[variable]
-                self.logger.info(f"Using channel[{channum}] specific {variable}={value}")
+                self.log.info(f"Using channel[{channum}] specific {variable}={value}")
                 return value
         return default
 
@@ -184,7 +184,7 @@ class Recorder:
         """ Example response:
         {"command": "APIVersion", "serial": 1, "value": "3", "status": "OK"}
         """
-        self.logger.debug("APIVersion called")
+        self.log.debug("APIVersion called")
         self.send_response(kwargs, {"status": "OK"})
 
     def version(self, **kwargs) -> None:
@@ -195,7 +195,7 @@ class Recorder:
         """ Example response:
         {"command":"APIVersion","message":"3","serial":"1","status":"OK"}
         """
-        self.logger.debug("Version? called")
+        self.log.debug("Version? called")
         self.send_response(kwargs, {"status": "OK", "message": __version__})
 
     def description(self, **kwargs) -> None:
@@ -206,9 +206,9 @@ class Recorder:
         """ Example response:
         {"command":"Description?","message":"mag-1-2-3","serial":"3","status":"OK"}
         """
-        self.logger.debug(f"Variables:\n{self.variables}")
+        self.log.debug(f"Variables:\n{self.variables}")
 
-        self.logger.debug("Description? called")
+        self.log.debug("Description? called")
         # Get description from config if available
         desc = self.config.get('RECORDER', {}).get('DESC', 'External Recorder')
         desc = dequote(replace_variables_in_string(desc, self.variables))
@@ -222,8 +222,12 @@ class Recorder:
         """ Example response:
         {"command":"HasTuner","message":"Yes","serial":"2","status":"OK"}
         """
-        self.logger.debug("HasTuner? called")
-        if ('COMMAND' in self.config['TUNER'] and
+        self.log.debug("HasTuner? called")
+        if 'TUNER' not in self.config:
+            self.log.warn(f"Failed to find [TUNER] section in {self.config}")
+            self.recorder_tunes = False
+            msg = "No"
+        elif ('COMMAND' in self.config['TUNER'] and
              len(self.config['TUNER']['COMMAND']) > 0):
             self.recorder_tunes = False
             msg = "Yes"
@@ -244,7 +248,7 @@ class Recorder:
         """ Example response:
         {"command":"HasPictureAttributes","message":"No","serial":"4","status":"OK"}
         """
-        self.logger.debug("HasPictureAttributes? called")
+        self.log.debug("HasPictureAttributes? called")
         self.send_response(kwargs, {"status": "OK", "message": "No"})
 
     def flow_control(self, **kwargs) -> None:
@@ -255,7 +259,7 @@ class Recorder:
         """ Example response:
         {"command":"FlowControl?","message":"XON/XOFF","serial":"5","status":"OK"}
         """
-        self.logger.debug("FlowControl? called")
+        self.log.debug("FlowControl? called")
         self.send_response(kwargs, {"status": "OK", "message": "XON/XOFF"})
 
     def block_size_handler(self, **kwargs) -> None:
@@ -266,7 +270,7 @@ class Recorder:
         """ Example response:
         {"command":"BlockSize","message":"Blocksize 3080192","serial":"6","status":"OK"}
         """
-        self.logger.debug("BlockSize called")
+        self.log.debug("BlockSize called")
         self.send_response(kwargs, {"status": "OK", "message": f"Blocksize {self.block_size}"})
 
     def lock_timeout(self, **kwargs) -> None:
@@ -278,7 +282,7 @@ class Recorder:
         {"command":"LockTimeout","message":"30000","serial":"8","status":"OK"}
         """
 
-        self.logger.debug("LockTimeout? called")
+        self.log.debug("LockTimeout? called")
         # Get timeout from config if available
         timeout = self.config.get('TUNER', {}).get('TIMEOUT', '30000')
         timeout = self.channel_override("TIMEOUT", timeout)
@@ -294,7 +298,7 @@ class Recorder:
         {"command":"SignalStrengthPercent?","serial":11}
         """
 
-        self.logger.debug("SignalStrengthPercent? called")
+        self.log.debug("SignalStrengthPercent? called")
         if self.recorder_tunes:
             message = "100"
         elif ('Tune' not in self.processes or
@@ -324,7 +328,7 @@ class Recorder:
         {"command":"HasLock?","serial":12}
         """
 
-        self.logger.debug("SignalStrengthPercent? called")
+        self.log.debug("SignalStrengthPercent? called")
         if self.recorder_tunes:
             message = "Yes"
         elif ('Tune' not in self.processes or
@@ -346,13 +350,13 @@ class Recorder:
         """ Example response:
         {"command":"TuneChannel","message":"InProgress `/usr/local/bin/roku-control --channum 318"`","serial":"9","status":"OK"}
         """
-        self.logger.debug("TuneChannel called")
-        self.logger.debug(f"Received TuneChannel message: {kwargs}")
+        self.log.debug("TuneChannel called")
+        self.log.debug(f"Received TuneChannel message: {kwargs}")
 
         # Update variables with message data
-        if self.logger.isEnabledFor(logging.DEBUG):
+        if self.log.isEnabledFor(logging.DEBUG):
             for key, value in kwargs.items():
-                self.logger.debug(f"{key}: {value}")
+                self.log.debug(f"{key}: {value}")
 
         self.process_variables_in_message(kwargs)
 
@@ -396,7 +400,7 @@ class Recorder:
         {"command":"CloseRecorder","message":"Terminating","serial":"9","status":"OK"}
         """
         self.streaming = False
-        self.logger.debug("CloseRecorder called")
+        self.log.debug("CloseRecorder called")
         self.send_response(kwargs, {"status": "OK", "message": "Terminating"})
         sys.exit(0)
 
@@ -409,7 +413,7 @@ class Recorder:
         {"command":"IsOpen?","message":"Not Open yet","serial":"13","status":"WARN"}
         """
 
-        self.logger.debug("IsOpen? called")
+        self.log.debug("IsOpen? called")
         msg = "Open" if self.stream_process else "No"
         self.send_response(kwargs, {"status": "OK", "message": msg})
 
@@ -421,11 +425,11 @@ class Recorder:
         """ Example response:
         {"command":"StartStreaming","message":"Streaming Started","serial":"11","status":"OK"}
         """
-        self.logger.debug("StartStreaming called")
-        self.logger.debug(f"Variables before command processing: {self.variables}")
+        self.log.debug("StartStreaming called")
+        self.log.debug(f"Variables before command processing: {self.variables}")
 
         if self.streaming:
-            self.logger.warning("Already streaming")
+            self.log.warning("Already streaming")
             self.send_response(kwargs, {"status": "error", "message": "Already streaming"})
             return
 
@@ -433,7 +437,7 @@ class Recorder:
         self.variables['URL'] = self.channel_override("URL", "")
 
         if self.config["RECORDER"]["COMMAND"] is None:
-            self.logger.warning("No [RECORDER/command] specified")
+            self.log.warning("No [RECORDER/command] specified")
             self.send_response(kwargs, {"status": "error",
                                "message": "No [RECORDER/command] specified"})
             return
@@ -455,10 +459,10 @@ class Recorder:
         """ Example response:
         {"command":"StopStreaming","message":"Streaming Stopped","serial":"12","status":"OK"}
         """
-        self.logger.debug("StopStreaming called")
+        self.log.debug("StopStreaming called")
 
         if not self.streaming:
-            self.logger.warning("Not currently streaming")
+            self.log.warning("Not currently streaming")
             self.send_response(kwargs, {"status": "error", "message": "Not streaming"})
             return
 
@@ -484,7 +488,7 @@ class Recorder:
         """ Example response:
         {"command":"XON","message":"Started Streaming","serial":"12","status":"OK"}
         """
-        self.logger.debug("XON called")
+        self.log.debug("XON called")
         self.send_response(kwargs, {"status": "OK",
                                     "message": "Started Streaming"})
         self.variables['XONCOUNT'] += 1
@@ -511,7 +515,7 @@ class Recorder:
         """ Example response:
         {"command":"XOFF","message":"Stopped Streaming","serial":"13","status":"OK"}
         """
-        self.logger.debug("XOFF called")
+        self.log.debug("XOFF called")
         self.xon_state = False
         self.send_response(kwargs, {"status": "OK",
                                     "message": "Stopped Streaming"})
@@ -533,16 +537,16 @@ class Recorder:
         """ Example response:
         {"command":"LoadChannels","message":"52","serial":"19","status":"OK"}
         """
-        self.logger.debug("LoadChannels called")
+        self.log.debug("LoadChannels called")
 
         # Get channel count from CHANNELS section
         channel_count = 0
         if 'CHANNELS' in self.config:
             channel_count = len(self.config['CHANNELS'])
 
-        if self.logger.isEnabledFor(logging.DEBUG):
+        if self.log.isEnabledFor(logging.DEBUG):
             for key,value in self.config['CHANNELS'].items():
-                self.logger.debug(f"{key} : {value}")
+                self.log.debug(f"{key} : {value}")
 
         self.send_response(kwargs, {"status": "OK", "message": str(channel_count)})
 
@@ -574,7 +578,7 @@ class Recorder:
         """ Example response:
         {"command":"FirstChannel","message":"ChanNum,ChanName,Callsign,xmltvid,icon","serial":"20","status":"OK"}
         """
-        self.logger.debug("FirstChannel called")
+        self.log.debug("FirstChannel called")
 
         if 'CHANNELS' not in self.config or not self.config['CHANNELS']:
             self.send_response(kwargs, {"status": "error", "message": "No channels available"})
@@ -592,7 +596,7 @@ class Recorder:
         """ Example response:
         {"command":"NextChannel","message":"ChanNum,ChanName,Callsign,xmltvid,icon","serial":"21","status":"OK"}
         """
-        self.logger.debug("NextChannel called")
+        self.log.debug("NextChannel called")
 
         if self.channel_iter == None:
             self.send_response(kwargs, {"status": "error", "message": "first_channel not called yet."})
@@ -602,7 +606,7 @@ class Recorder:
 
     def tune_status_handler(self, **kwargs) -> None:
         """Handle TuneStatus? command."""
-        self.logger.debug("TuneStatus? called")
+        self.log.debug("TuneStatus? called")
 
         if self.recorder_tunes:
             message = "Tuned"
@@ -647,7 +651,7 @@ class Recorder:
                 self._process_stderr_line(line_str)
 
             except Exception as e:
-                self.logger.error(f"Error reading stderr: {e}")
+                self.log.error(f"Error reading stderr: {e}")
                 break
 
     def _process_stderr_line(self, line: str) -> None:
@@ -713,7 +717,7 @@ class Recorder:
             self.send_response({"command": "STATUS"}, response, level)
 
         except Exception as e:
-            self.logger.exception(f"Error processing stderr line '{line}': {e}")
+            self.log.exception(f"Error processing stderr line '{line}': {e}")
 
     def _stream_loop(self) -> None:
         """Main streaming loop."""
@@ -721,15 +725,15 @@ class Recorder:
            passed on to mythbackend. Data is raw so don't modify it"""
 
         if not self.command:
-            self.logger.error("No command specified for streaming")
+            self.log.error("No command specified for streaming")
             return
 
-        self.logger.info(f"Starting streaming: {self.command}")
+        self.log.info(f"Starting streaming: {self.command}")
 
         try:
             # Split command into args for subprocess
             cmd_args = shlex.split(self.command)
-            self.logger.debug(f"Splitting command into args: {cmd_args}")
+            self.log.debug(f"Splitting command into args: {cmd_args}")
             self.stream_process = subprocess.Popen(
                 cmd_args,
                 stdout=subprocess.PIPE,
@@ -743,7 +747,7 @@ class Recorder:
             self.stderr_thread.daemon = True
             self.stderr_thread.start()
 
-            self.logger.info(f"Reading from sub process")
+            self.log.info(f"Reading from sub process")
 
             # Wait until initial data is available
             sel = selectors.DefaultSelector()
@@ -758,7 +762,7 @@ class Recorder:
             sel.close()
 
             if self.ondatastart_done:
-                self.logger.info("Already ran OnDataStart")
+                self.log.info("Already ran OnDataStart")
             else:
                 # Execute ondatastart command if available
                 data_cmd = self.config.get('TUNER', {}).get('ONDATASTART', "")
@@ -776,11 +780,11 @@ class Recorder:
                     st = self.stream_process.poll()
                     if st is not None:
                         if st == 0:
-                            self.logger.info("Process finished normally")
+                            self.log.info("Process finished normally")
                         elif st < 0:
-                            self.logger.warn("Process killed")
+                            self.log.warn("Process killed")
                         else:
-                            self.logger.warn("Process failed")
+                            self.log.warn("Process failed")
                         break
                     continue
 
@@ -790,7 +794,7 @@ class Recorder:
                     sys.stdout.flush()
 
         except Exception as e:
-            self.logger.exception(f"Error during streaming: {e}")
+            self.log.exception(f"Error during streaming: {e}")
             self.streaming = False
         finally:
             if self.stream_process:
@@ -800,7 +804,7 @@ class Recorder:
                 except subprocess.TimeoutExpired:
                     self.stream_process.kill()
                     self.stream_process.wait()
-            self.logger.info("Streaming stopped")
+            self.log.info("Streaming stopped")
 
     def _execute_command(self, command: str, desc: str,
                          background: bool) -> str:
@@ -812,7 +816,7 @@ class Recorder:
         if desc in self.processes and self.processes[desc]['status'] != "Idle":
             """A process with this name is already running, kill it"""
             proc = self.processes[desc]
-            self.logger.info(f"Force terminating {desc} process {proc['process'].pid}")
+            self.log.info(f"Force terminating {desc} process {proc['process'].pid}")
             try:
                 proc['process'].terminate()
                 proc['process'].wait(timeout=1)
@@ -838,7 +842,7 @@ class Recorder:
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE
                 )
-                self.logger.info(f"Started background {desc} command ({process.pid}): {command}")
+                self.log.info(f"Started background {desc} command ({process.pid}): {command}")
 
                 monitor_thread = threading.Thread(target=self._monitor_process, args=(desc,))
                 self.processes[desc] = {'process' : process,
@@ -849,7 +853,7 @@ class Recorder:
                 monitor_thread.start()
 
             except Exception as e:
-                self.logger.error(f"Error starting background {desc} command: {e}")
+                self.log.error(f"Error starting background {desc} command: {e}")
                 return None
         else:
             # Execute in foreground
@@ -875,7 +879,7 @@ class Recorder:
                 self.send_response({"command": "STATUS"}, response, level)
 
             except Exception as e:
-                self.logger.error(f"Error executing {desc} command: {e}")
+                self.log.error(f"Error executing {desc} command: {e}")
                 return None
 
         return command
@@ -906,12 +910,12 @@ class Recorder:
             self.send_response({"command": "STATUS"}, response, level)
         except Exception as e:
             self.processes[op]["status"] = "Error"
-            self.logger.exception(f"Error monitoring {op} completion: {e}")
+            self.log.exception(f"Error monitoring {op} completion: {e}")
 
     def process_variables_in_message(self, message: Dict[str, Any]) -> None:
         """Process variables from the TuneChannel message."""
-        self.logger.debug(f"Processing message variables. Message: {message}")
-        self.logger.debug(f"Initial variables: {self.variables}")
+        self.log.debug(f"Processing message variables. Message: {message}")
+        self.log.debug(f"Initial variables: {self.variables}")
 
         # Update with message data
         for key, value in message.items():
@@ -919,12 +923,12 @@ class Recorder:
                 continue
             # Convert key to uppercase for consistent naming
             self.variables[key.upper()] = str(value)
-            self.logger.debug(f"Added message variable {key.upper()} = {value}")
+            self.log.debug(f"Added message variable {key.upper()} = {value}")
 
         for key, value in self.variables.items():
             self.variables[key] = replace_variables_in_string(value, self.variables)
 
-        self.logger.debug(f"Final variables after message processing: {self.variables}")
+        self.log.debug(f"Final variables after message processing: {self.variables}")
 
 
 def dequote(s):
