@@ -42,6 +42,7 @@ class Recorder:
         self.tune_status         = "Idle"  # Idle, InProgress, Tuned
         self.channel_iter        = None
         self.processes           = {}
+#        self.touch_has_error     = False
 
         # Configuration
         self.config    = config or {}
@@ -102,6 +103,21 @@ class Recorder:
                     proc['process'].kill()
                     proc['process'].wait()
 
+
+    def handle_touch_error(self, exit_code: int, error_msg: str) -> None:
+        """This method acts as the receiver hook for the Touch class alert."""
+        self.log.error(f"[Recorder Intercept] Touch reported a failure! Exit Code: {exit_code}. Message: {error_msg}")
+
+#        self.touch_has_error = True
+
+        level = logging.WARN
+        response = {
+            "message": error_msg,
+            "status": "DAMAGED"
+        }
+        self.send_response({"command": "STATUS"}, response, level)
+
+
     # Handle Json message from mythbackend
     def process_command(self, message: Dict[str, Any]) -> None:
         """Process a command from stdin."""
@@ -126,34 +142,38 @@ class Recorder:
 
     # Respond to mythbackend.
     def send_response(self, original_message: Dict[str, Any],
-                      response_data: Dict[str, Any], level: int = logging.INFO) -> None:
+                      response_data: Dict[str, Any],
+                      level: int = logging.INFO) -> None:
         """Send a JSON response to stderr where mythbackend will read it."""
 
-        # Echo original command and serial.
+        # Build the response object safely (local thread memory)
         keep_keys = ["command", "serial", "value"]
         response = {key: original_message[key] for key in keep_keys
                     if key in original_message}
         response.update(response_data)
 
-        # Write to stderr
-        try:
-            json.dump(response, sys.stderr)
-            sys.stderr.write("\n")
-            sys.stderr.flush()
-            if response['command'] == 'STATUS':
-                self.log.log(level, f"> {response['message']}")
-            else:
-                if 'message' in response:
-                    self.log.log(level,
-                                    f"'{response['command']}' → '{response['message']}'")
-                elif 'value' in response:
-                    self.log.log(level,
-                                    f"'{response['command']}' ← '{response['value']}'")
+        # Acquire the mutex before interacting with the shared stream
+        with self._stderr_lock:
+            try:
+                json.dump(response, sys.stderr)
+                sys.stderr.write("\n")
+                sys.stderr.flush()
+
+                if response['command'] == 'STATUS':
+                    self.log.log(level, f"> {response['message']}")
                 else:
-                    self.log.log(level,
-                                    f"> '{response['command']}'")
-        except Exception as e:
-            self.log.exception(f"Failed to send response: {e}\n{response}")
+                    if 'message' in response:
+                        self.log.log(level,
+                                     f"'{response['command']}' → '{response['message']}'")
+                    elif 'value' in response:
+                        self.log.log(level,
+                                     f"'{response['command']}' ← '{response['value']}'")
+                    else:
+                        self.log.log(level,
+                                     f"> '{response['command']}'")
+            except Exception as e:
+                self.log.exception(f"Failed to send response: {e}\n{response}")
+
 
     def channel_override(self, variable : str, default : str):
         """Check [TUNER/channel] ini file for commands and values
@@ -442,8 +462,9 @@ class Recorder:
                                "message": "No [RECORDER/command] specified"})
             return
 
-        self.command = dequote(replace_variables_in_string(self.config["RECORDER"]["COMMAND"],
-                                                                self.variables))
+        self.command = dequote(replace_variables_in_string
+                               (self.config["RECORDER"]["COMMAND"],
+                                self.variables))
         self.streaming = True
         self.stream_thread = threading.Thread(target=self._stream_loop)
         self.stream_thread.daemon = True
@@ -936,9 +957,12 @@ def dequote(s):
         return s[1:-1]
     return s
 
+
 def replace_variables_in_string(value: str, variables: dict) -> str:
-    """Variables can come from the [VARIABLES] section in ini file, or from
-       data passed as part of the TuneChannel json message"""
+    """Variables can come from the [VARIABLES] section in ini file,
+    or from data passed as part of the TuneChannel json
+    message. Supports nested variables.
+    """
 
     if not value:
         return value
@@ -946,53 +970,59 @@ def replace_variables_in_string(value: str, variables: dict) -> str:
     logger = logging.getLogger(__name__)
 
     try:
-        # First, handle the special blocks that need to be removed if any variables are unknown
-        """ If '[{...}] is seen, remove that block of code unless ALL of the variables (e.g. ${VERSION})
-            are known."""
+        # Pre-normalize dictionary keys to lowercase for efficiency
+        # This eliminates the O(N) loop inside regex substitutions
+        lower_vars = {k.lower(): str(v) for k, v in variables.items() if v}
+
         def replace_special_block(match):
             block_content = match.group(1)
             # Find all variables in the block
             variables_in_block = re.findall(r'\$\{([^}]+)\}', block_content)
 
-            # Check if all variables in the block are known and not empty
             all_known_and_non_empty = True
             for var_name in variables_in_block:
-                # Case insensitive lookup
-                found = False
-                for key, val in variables.items():
-                    if key.lower() == var_name.lower() and val:
-                        found = True
-                        break
-                if not found:
+                if var_name.lower() not in lower_vars:
                     all_known_and_non_empty = False
                     break
 
-            # If all variables are known and non-empty, return the block content
-            # Otherwise, return empty string (remove the block)
             return block_content if all_known_and_non_empty else ""
 
-        # Process special blocks first
-        processed_value = re.sub(r'\[\{([^}]*?\$\{[^}]+\}[^}]*?)\}\]', replace_special_block, value, flags=re.DOTALL)
-
-        # Now replace regular variables
         def replace_variable(match):
-            var_name = match.group(1)
-            # Case insensitive lookup
-            for key, val in variables.items():
-                if key.lower() == var_name.lower():
-                    return dequote(str(val))
-            # If variable not found, leave it alone
+            var_name = match.group(1).lower()
+            if var_name in lower_vars:
+                # Assuming dequote handles string cleanup
+                return dequote(lower_vars[var_name])
             return match.group(0)
 
-        # Replace all variables in the processed string
-        """Variables are in 'shell' style of ${VARNAME}"""
-        result = re.sub(r'\$\{([^}]+)\}', replace_variable, processed_value)
+        current_value = value
+        # Protection against circular references (e.g., A -> B -> A)
+        max_depth = 10
+
+        for depth in range(max_depth):
+            previous_value = current_value
+
+            # Process special conditional blocks first
+            current_value = re.sub(
+                r'\[\{([^}]*?\$\{[^}]+\}[^}]*?)\}\]',
+                replace_special_block, current_value, flags=re.DOTALL
+            )
+
+            # Replace regular variables
+            current_value = re.sub(r'\$\{([^}]+)\}', replace_variable, current_value)
+
+            # If the string didn't change this iteration, all
+            # variables are fully expanded.
+            if current_value == previous_value:
+                break
+        else:
+            logger.warning(f"Max variable substitution depth ({max_depth}) "
+                           "reached. Possible circular reference in: {value}")
 
     except Exception as e:
         logger.error(f"Replacing in {value}")
-        for key,data in variables.items():
+        for key, data in variables.items():
             logger.error(f"{key} : {data}")
         logger.exception(f"Failed to replace variables: {e}")
         return None
 
-    return result
+    return current_value

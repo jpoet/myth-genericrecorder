@@ -7,7 +7,6 @@ from pathlib import Path
 
 # ==============================================================================
 # TRACE LEVEL INJECTION & LIVE PROXY
-# ==============================================================================
 TRACE_LEVEL_NUM = 5
 logging.addLevelName(TRACE_LEVEL_NUM, "TRACE")
 
@@ -17,12 +16,10 @@ def trace(self, message, *args, **kws):
         self._log(TRACE_LEVEL_NUM, message, args, **kws)
 logging.Logger.trace = trace
 
-# The wrapper class that solves the initialization race condition
 class LiveLogger:
     def __getattr__(self, name):
         return getattr(logging.getLogger(), name)
 
-# Replaces your old: log = logging.getLogger()
 log = LiveLogger()
 # ==============================================================================
 

@@ -6,7 +6,6 @@ import argparse
 import json
 
 from myth_genericrecorder.logger import setup_logging, log
-#from myth_genericrecorder.logger import setup_logging
 import logging
 
 import os
@@ -17,7 +16,8 @@ from typing import Dict, Any, Optional
 import configparser
 import re
 
-from myth_genericrecorder.recorder import Recorder, replace_variables_in_string
+from myth_genericrecorder.recorder import Recorder, replace_variables_in_string, dequote
+from myth_genericrecorder.touch import Touch
 
 def parse_arguments() -> argparse.Namespace:
     """Parse command line arguments."""
@@ -193,6 +193,7 @@ def parse_config_file(config_path: Path) -> Dict[str, Any]:
 
     return processed_config, variables
 
+
 def main():
     """Main entry point."""
     args = parse_arguments()
@@ -235,6 +236,10 @@ def main():
             log.exception(f"Failed to load configuration: {e}")
             sys.exit(1)
 
+    if 'RECORDER' not in config:
+        log.error("No [RECORDER] section found in configuration.")
+        return False;
+
     # Create recorder with configuration
     recorder = Recorder(
         command=args.command,
@@ -244,6 +249,16 @@ def main():
         variables=variables,
         block_size=args.blocksize
     )
+
+    if 'TOUCH' in config:
+        frequency = config['TOUCH'].get('FREQUENCY')
+        command   = replace_variables_in_string(config['TOUCH'].get('COMMAND'),
+                                                variables)
+        if frequency and command:
+            keepalive = Touch(frequency=frequency,
+                              command=dequote(command),
+                              on_error_callback=recorder.handle_touch_error)
+            keepalive.start()
 
     # Process stdin messages
     try:
@@ -278,6 +293,9 @@ def main():
         log.error("Unexpected error in main loop")
         log.error(f"Error details: {e}")
         sys.exit(1)
+
+    if keepalive:
+        keepalive.stop()
 
 if __name__ == "__main__":
     main()
