@@ -7,10 +7,11 @@ import sys
 import threading
 import time
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Callable
 import shlex
 import re
 import selectors
+
 
 from importlib.metadata import version
 __version__ = version("myth-genericrecorder")
@@ -18,14 +19,13 @@ __version__ = version("myth-genericrecorder")
 class Recorder:
     """Recorder class to handle streaming and command execution."""
 
-    def __init__(self, command: Optional[str] = None,
+    def __init__(self,
                  logger: Optional[logging.Logger] = None,
-                 tune_command: Optional[str] = None,
                  config: Optional[Dict] = None,
                  variables: Dict = None,
-                 block_size: int = 1048576):
+                 block_size: int = 1048576,
+                 event_callback: Optional[Callable[[str, Dict[str, Any]], None]] = None):
         """Initialize the recorder."""
-        self.command             = None
         self.log                 = logging.getLogger(__name__)
         self.streaming           = False
         self.stream_thread       = None
@@ -42,16 +42,11 @@ class Recorder:
         self.tune_status         = "Idle"  # Idle, InProgress, Tuned
         self.channel_iter        = None
         self.processes           = {}
-#        self.touch_has_error     = False
+        self.main_event          = event_callback
 
         # Configuration
         self.config    = config or {}
         self.variables = variables or {}
-
-        if command is not None and len(command) > 0:
-            self.config['RECORDER']['command'] = command
-        if tune_command is not None and len(tune_command) > 0:
-            self.config['TUNER']['command'] = tune_command
 
         # Keep track of how many times XON is called
         self.variables['XONCOUNT'] = 0
@@ -85,7 +80,7 @@ class Recorder:
             "FirstChannel"         : self.first_channel,
             "NextChannel"          : self.next_channel
         }
-        self.log.trace(f"Recorder.__init__ called with config={config}")  # Debug line
+        self.log.trace(f"Recorder.__init__ called with config={config}")
 
     def __del__(self):
         # Terminate when the object is destroyed
@@ -95,7 +90,8 @@ class Recorder:
         # Kill any subprocess that is still running
         for key,proc in self.processes.items():
             if proc['process'] and proc['process'].poll() is None:
-                self.log.info(f"Force terminating {key} process {proc['process'].pid}")
+                self.log.info(f"Force terminating {key} process "
+                              f"{proc['process'].pid}")
                 try:
                     proc['process'].terminate()
                     proc['process'].wait(timeout=2)
@@ -105,11 +101,9 @@ class Recorder:
 
 
     def handle_touch_error(self, exit_code: int, error_msg: str) -> None:
-        """This method acts as the receiver hook for the Touch class alert."""
-        self.log.error(f"[Recorder Intercept] Touch reported a failure! Exit Code: {exit_code}. Message: {error_msg}")
-
-#        self.touch_has_error = True
-
+        """Touch class calls this when a command fails and
+        DAMAGED_ON_FAILURE is true
+        """
         level = logging.WARN
         response = {
             "message": error_msg,
@@ -117,6 +111,10 @@ class Recorder:
         }
         self.send_response({"command": "STATUS"}, response, level)
 
+
+    def getVariables(self):
+        """ Allow Touch class access to variables for commands. """
+        return self.variables
 
     # Handle Json message from mythbackend
     def process_command(self, message: Dict[str, Any]) -> None:
@@ -128,7 +126,9 @@ class Recorder:
 
         if command not in self.handlers:
             self.log.warning(f"Unknown command: {command}")
-            self.send_response(message, {"status": "error", "message": "Unknown command"})
+            self.send_response(message,
+                               {"status": "error",
+                                "message": "Unknown command"})
             return
 
         try:
@@ -146,14 +146,14 @@ class Recorder:
                       level: int = logging.INFO) -> None:
         """Send a JSON response to stderr where mythbackend will read it."""
 
-        # Build the response object safely (local thread memory)
+        # Build the response object
         keep_keys = ["command", "serial", "value"]
         response = {key: original_message[key] for key in keep_keys
                     if key in original_message}
         response.update(response_data)
 
-        # Acquire the mutex before interacting with the shared stream
-        with self._stderr_lock:
+        # Can be called from different threads
+        with self.stderr_lock:
             try:
                 json.dump(response, sys.stderr)
                 sys.stderr.write("\n")
@@ -164,10 +164,12 @@ class Recorder:
                 else:
                     if 'message' in response:
                         self.log.log(level,
-                                     f"'{response['command']}' → '{response['message']}'")
+                                     f"'{response['command']}' → "
+                                     f"'{response['message']}'")
                     elif 'value' in response:
                         self.log.log(level,
-                                     f"'{response['command']}' ← '{response['value']}'")
+                                     f"'{response['command']}' ← "
+                                     f"'{response['value']}'")
                     else:
                         self.log.log(level,
                                      f"> '{response['command']}'")
@@ -177,7 +179,8 @@ class Recorder:
 
     def channel_override(self, variable : str, default : str):
         """Check [TUNER/channel] ini file for commands and values
-        which override those in the main config file."""
+        which override those in the main config file.
+        """
 
         # Get the channum from variables
         channum = self.variables.get('CHANNUM', None)
@@ -192,7 +195,8 @@ class Recorder:
             channel_config = self.config['CHANNELS'].get(channum, {})
             if variable in channel_config:
                 value = channel_config[variable]
-                self.log.info(f"Using channel[{channum}] specific {variable}={value}")
+                self.log.info(f"Using channel[{channum}] specific "
+                              f"{variable}={value}")
                 return value
         return default
 
@@ -525,6 +529,8 @@ class Recorder:
         recstart_cmd = self.channel_override("RECSTART", recstart_cmd)
         if recstart_cmd:
             self._execute_command(recstart_cmd, "RECSTART", background=False)
+
+        self.signal_event("RECSTART")
 
     def xoff(self, **kwargs) -> None:
         """Handle XOFF command."""
@@ -951,7 +957,25 @@ class Recorder:
 
         self.log.debug(f"Final variables after message processing: {self.variables}")
 
+    def signal_event(self, event_type: str,
+                     details: Optional[Dict[str, Any]] = None) -> None:
+        """Safely signals an operational event back to the main
+        application context."""
+        if self.main_event:
+            try:
+                # Fallback to an empty dictionary if no extra context
+                # details are passed
+                data = details or {}
+                self.log.debug(f"Signaling event '{event_type}' to main...")
 
+                # Execute the callback defined in main.py
+                self.main_event(event_type, data)
+            except Exception as e:
+                self.log.exception("Exception encountered within main"
+                                   f"event handler callback: {e}")
+
+
+######## globals ########
 def dequote(s):
     if len(s) >= 2 and s[0] == s[-1] and s.startswith(("'","\"")):
         return s[1:-1]

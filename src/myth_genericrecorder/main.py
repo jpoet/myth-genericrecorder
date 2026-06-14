@@ -5,6 +5,8 @@ from importlib.metadata import version
 import argparse
 import json
 
+from myth_genericrecorder.recorder import Recorder, replace_variables_in_string, dequote
+from myth_genericrecorder.touch import Touch
 from myth_genericrecorder.logger import setup_logging, log
 import logging
 
@@ -16,20 +18,16 @@ from typing import Dict, Any, Optional
 import configparser
 import re
 
-from myth_genericrecorder.recorder import Recorder, replace_variables_in_string, dequote
-from myth_genericrecorder.touch import Touch
 
 def parse_arguments() -> argparse.Namespace:
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(
         description="Generic recorder that processes JSON commands "
-                    "and executes external commands",
+                    "and executes external programs",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Usage examples:
   %(prog)s --conf "/home/myth/etc/magewell-1-4.conf"
-  %(prog)s --command "vlc --demux=mp4 input.mp4"
-  %(prog)s --command "streamlink twitch.tv/channel best"
         """
     )
 
@@ -60,28 +58,9 @@ Usage examples:
         required=False
     )
     parser.add_argument(
-        "--command",
-        help="External command to execute during streaming",
-        type=str,
-        required=False
-    )
-    parser.add_argument(
-        "--tune",
-        help="Tune command to execute in background",
-        type=str,
-        required=False
-    )
-    parser.add_argument(
         "--conf",
         help="Configuration file path",
         type=Path,
-        required=False
-    )
-    parser.add_argument(
-        "--blocksize",
-        help="Block size for streaming (default: 64k)",
-        type=int,
-        default=65536,
         required=False
     )
     parser.add_argument(
@@ -102,7 +81,59 @@ Usage examples:
 
     return parser.parse_args()
 
-def process_config_section(config: configparser.ConfigParser, section_name: str) -> Dict[str, str]:
+
+#################
+# 'TOUCH' threads
+PREPARED_TOUCHES = []
+ACTIVE_TOUCHES = []
+
+def handle_recorder_event(event_type: str, data: dict) -> None:
+    global PREPARED_TOUCHES, ACTIVE_TOUCHES
+
+    if len(PREPARED_TOUCHES) == 0:
+        return
+
+    if event_type == "RECSTART":
+        logging.info("Starting Touch loops...")
+        for keepalive in PREPARED_TOUCHES:
+            keepalive.start()
+            # Move the reference to the active list instead of deleting it
+            ACTIVE_TOUCHES.append(keepalive)
+        PREPARED_TOUCHES.clear()
+
+    elif event_type == "STREAM_STOPPED":
+        logging.warning("Stopping Touch loops...")
+        for keepalive in ACTIVE_TOUCHES:
+            keepalive.stop()
+        ACTIVE_TOUCHES.clear()
+
+
+#####################
+# Read config file(s)
+def process_config_section(config: configparser.ConfigParser,
+                           section_name: str) -> Dict[str, str]:
+    """Process a configuration section from a ConfigParser instance.
+
+    Extracts all key/value pairs, filters out empty entries, and normalizes
+    all dictionary keys to UPPERCASE for uniform downstream variable lookups.
+    """
+    if section_name not in config:
+        return {}
+
+    result = {}
+
+    # config[section_name].items() automatically handles
+    # case-insensitive key retrieval from the source file, but
+    # force uppercase on the resulting dictionary output.
+    for key, value in config[section_name].items():
+        if value is not None:
+            result[key.upper()] = value
+
+    return result
+
+
+def process_config_section(config: configparser.ConfigParser,
+                           section_name: str) -> Dict[str, str]:
     """Process a configuration section with variable replacement."""
     if section_name not in config:
         return {}
@@ -113,8 +144,15 @@ def process_config_section(config: configparser.ConfigParser, section_name: str)
             result[key.upper()] = value
     return result
 
-def parse_config_file(config_path: Path) -> Dict[str, Any]:
-    """Parse the configuration file and return a dictionary of settings."""
+
+def parse_config_file(config_path: Path) -> tuple[Dict[str, Any],
+                                                  Dict[str, str]]:
+    """Parse the configuration file and return a dictionary of settings.
+
+    Normalizes all section names and inner variable keys to UPPERCASE
+    to prevent case-mismatch errors down the line during execution
+    lookups.
+    """
     config = configparser.ConfigParser(allow_no_value=True)
 
     # Read the main configuration file
@@ -129,71 +167,79 @@ def parse_config_file(config_path: Path) -> Dict[str, Any]:
         for key, value in config['VARIABLES'].items():
             if value is not None:  # Skip keys without values
                 variables[key.upper()] = value
-                log.debug(f"Loaded variable {key} = {value}")
+                log.debug(f"Loaded variable {key.upper()} = {value}")
 
-    # Process INCLUDE section
+    # Process INCLUDE section and merge options
     if 'INCLUDE' in config:
-        include_files = config['INCLUDE']
-        for include_file in include_files:
-            include_path = Path(replace_variables_in_string(include_file, variables))
+        # include_files will iterate over the options/keys under the
+        # [INCLUDE] header
+        for include_file, _ in config.items('INCLUDE'):
+            include_path = Path(replace_variables_in_string(include_file,
+                                                            variables))
+
             # Resolve relative paths relative to the main config file
             if not include_path.is_absolute():
                 include_path = config_path.parent / include_path
+
             if include_path.exists():
                 log.debug(f"Loading included config: {include_path}")
                 include_config = configparser.ConfigParser(allow_no_value=True)
                 include_config.read(include_path)
 
-                # Merge included config into main config
-                for section_name, section_data in include_config.items():
+                # Safe Explicit Merge: Build configuration data nodes correctly
+                for section_name in include_config.sections():
                     if section_name == 'DEFAULT':
                         continue
-                    config[section_name] = process_config_section(include_config, section_name)
-                    """
-                    if section_name not in config:
-                        config[section_name] = {}
-                    for key, value in section_data.items():
-                        config[section_name][key.upper()] = value
-                    """
+
+                    if not config.has_section(section_name):
+                        config.add_section(section_name)
+
+                    for key, value in include_config.items(section_name):
+                        config.set(section_name, key, value)
             else:
                 log.warning(f"Include file not found: {include_path}")
 
-    # Process all sections
+    # Process all parsed sections with uppercase header normalization
     processed_config = {}
     for section_name, section_data in config.items():
         if section_name == 'DEFAULT':
             continue
-        processed_config[section_name] = process_config_section(config, section_name)
 
-    # Load channel configuration if specified
-    if 'TUNER' in processed_config and 'CHANNELS' in processed_config['TUNER']:
-        channel_file = processed_config['TUNER']['CHANNELS']
+        processed_config[section_name.upper()] = process_config_section(config, section_name)
+
+    # Load external channel configuration if provided
+    tuner_section = processed_config.get('TUNER', {})
+    if 'CHANNELS' in tuner_section:
+        channel_file = tuner_section['CHANNELS']
         channel_path = Path(channel_file)
+
         if channel_path.exists():
             log.debug(f"Processing channels from {channel_path}")
             channel_config = configparser.ConfigParser(allow_no_value=True)
             channel_config.read(channel_path)
 
-            # Process channel configurations with variable replacement
+            # Process channel configurations with variable replacement mapping
             processed_config['CHANNELS'] = {}
             for section_name, section_data in channel_config.items():
                 if section_name == 'DEFAULT':
                     continue
-                processed_config['CHANNELS'][section_name] = process_config_section(channel_config, section_name)
-            log.trace(f"Channels: {processed_config['CHANNELS']}")
+                # Normalize sub-channel blocks to uppercase
+                processed_config['CHANNELS'][section_name.upper()] = process_config_section(channel_config, section_name)
         else:
-            log.debug(f"No channels processed")
+            log.debug(f"Channel layout file not found: {channel_path}")
             processed_config['CHANNELS'] = {}
-#    else:
-#        log.error(f"'channels' not in {processed_config['TUNER']}")
+    else:
+        processed_config['CHANNELS'] = {}
 
-    if log.isEnabledFor(logging.DEBUG):
-        for key,data in processed_config.items():
-            log.trace(f"{key}={data}")
+    # Output debugging traces if enabled
+    for key, data in processed_config.items():
+        log.debug(f"Configuration Map -> [{key}] = {data}")
 
     return processed_config, variables
 
 
+############
+# Main entry
 def main():
     """Main entry point."""
     args = parse_arguments()
@@ -215,8 +261,6 @@ def main():
     log_dir.parent.mkdir(parents=True, exist_ok=True)
     log_file = log_dir / f"myth-genericrecorder-{args.inputid}.log"
 
-    print(f"log level: {args.loglevel}")
-
     setup_logging(log_file, args.debug, args.quiet,
                   default_level=args.loglevel)
     if args.debug:
@@ -226,7 +270,7 @@ def main():
     log.debug(f"Command line arguments: {args}")
     log.debug(f"Log file path: {log_file}")
 
-    # Load configuration if provided
+    # Load configuration
     config = {}
     if args.conf:
         try:
@@ -242,25 +286,46 @@ def main():
 
     # Create recorder with configuration
     recorder = Recorder(
-        command=args.command,
         logger=log,
-        tune_command=args.tune,
         config=config,
         variables=variables,
-        block_size=args.blocksize
+        event_callback=handle_recorder_event
     )
 
-    if 'TOUCH' in config:
-        frequency = config['TOUCH'].get('FREQUENCY')
-        command   = replace_variables_in_string(config['TOUCH'].get('COMMAND'),
-                                                variables)
-        if frequency and command:
-            keepalive = Touch(frequency=frequency,
-                              command=dequote(command),
-                              on_error_callback=recorder.handle_touch_error)
-            keepalive.start()
+    # Look for any configuration sections starting with "TOUCH"
+    touch_sections = [sec for sec in config.keys() if sec.startswith('TOUCH')]
 
-    # Process stdin messages
+    for section in touch_sections:
+        touch_config = config[section]
+
+        command = touch_config.get('COMMAND')
+        delay = touch_config.get('DELAY')
+        frequency = touch_config.get('FREQUENCY')
+
+        # Pull the new field out (will safely return None if omitted)
+        damaged_on_failure_str = touch_config.get('DAMAGED_ON_FAILURE')
+
+        if command:
+            log.debug("Preparing background Touch instance "
+                      f"for section: [{section}]")
+
+            keepalive = Touch(
+                frequency=frequency,
+                delay=delay,
+                command=command,
+                recorder_instance=recorder,
+                damaged_on_failure_str=damaged_on_failure_str # Pass it here!
+            )
+
+            PREPARED_TOUCHES.append(keepalive)
+        else:
+            log.warning(f"Section [{section}] found, but 'COMMAND' "
+                        "is missing. Skipping.")
+
+
+    ######
+    # Main processing loop.
+    # Receives JSON message on stdin and process them.
     try:
         for line in sys.stdin:
             line = line.strip()
@@ -294,8 +359,11 @@ def main():
         log.error(f"Error details: {e}")
         sys.exit(1)
 
-    if keepalive:
+    for keepalive in ACTIVE_TOUCHES:
         keepalive.stop()
+
+    ACTIVE_TOUCHES.clear()
+
 
 if __name__ == "__main__":
     main()
