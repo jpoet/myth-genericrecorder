@@ -189,10 +189,10 @@ class Recorder:
             self.log.debug(f"Could not determine channum for {variable}")
             return default
 
-        if 'CHANNELS' in self.config:
-            self.log.debug(f"Looking for {channum} in "
+        if 'TUNER' in self.config and 'CHANNELS' in self.config['TUNER']:
+            self.log.info(f"Looking for {channum} in "
                               f"{self.config['TUNER']['CHANNELS']}")
-            channel_config = self.config['CHANNELS'].get(channum, {})
+            channel_config = self.config['TUNER']['CHANNELS'].get(channum, {})
             if variable in channel_config:
                 value = channel_config[variable]
                 self.log.info(f"Using channel[{channum}] specific "
