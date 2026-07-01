@@ -132,19 +132,6 @@ def process_config_section(config: configparser.ConfigParser,
     return result
 
 
-def process_config_section(config: configparser.ConfigParser,
-                           section_name: str) -> Dict[str, str]:
-    """Process a configuration section with variable replacement."""
-    if section_name not in config:
-        return {}
-
-    result = {}
-    for key, value in config[section_name].items():
-        if value is not None:
-            result[key.upper()] = value
-    return result
-
-
 def parse_config_file(config_path: Path) -> tuple[Dict[str, Any],
                                                   Dict[str, str]]:
     """Parse the configuration file and return a dictionary of settings.

@@ -407,6 +407,27 @@ class Recorder:
                                 })
             return
 
+        if ('Tune' in self.processes and
+            self.processes['Tune'] is not None and
+            self.processes['Tune']['command'] == tune_cmd):
+            status = self.processes['Tune']['status']
+            message = status if status != "Finished" else "Tuned"
+
+            self.log.info(f"Previous tune: {message}")
+            self.send_response(kwargs,
+                               {"status": "OK",
+                                "message": message},
+                               logging.DEBUG
+                               )
+
+            if status == 'Finished':
+                newep_cmd = self.config.get('NEWEPISODE', {}).get('COMMAND', '')
+                newep_cmd = self.channel_override("NEWEPISODE", newep_cmd)
+                if newep_cmd:
+                    self._execute_command(newep_cmd, "NEWEPISODE",
+                                          background=False)
+            return
+
         tune_cmd = self._execute_command(tune_cmd, "Tune",
                                          background=True)
 
@@ -547,7 +568,7 @@ class Recorder:
         self.send_response(kwargs, {"status": "OK",
                                     "message": "Stopped Streaming"})
 
-        if self.variables['XONCOUNT'] < 2:
+        if 'XONCOUNT' in self.variables and self.variables['XONCOUNT'] < 2:
             return
 
         recstop_cmd = self.config.get('RECSTOP', {}).get('COMMAND', '')
