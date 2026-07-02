@@ -409,12 +409,13 @@ class Recorder:
 
         check_keys = ["callsign", "chanid", "channum", "sourceid"]
         check_params = {k: kwargs[k] for k in check_keys if k in kwargs}
-        self.log.info(f"Tuning with {check_params}")
 
         if ('Tune' in self.processes and
             self.processes['Tune'] is not None and
             'status' in self.processes['Tune']):
             status = self.processes['Tune']['status']
+        else:
+            status = ""
 
         if status == 'Finished' and self.tuned_params == check_params:
             self.log.info(f"Already tuned to {check_params}")
@@ -431,6 +432,7 @@ class Recorder:
                                       background=False)
             return
 
+        self.log.info(f"Tuning with {check_params}")
         self.tuned_params = check_params
         tune_cmd = self._execute_command(tune_cmd, "Tune",
                                          background=True)
@@ -979,9 +981,11 @@ class Recorder:
             self.variables[key.upper()] = str(value)
             self.log.debug(f"Added message variable {key.upper()} = {value}")
 
+        """
         for key, value in self.variables.items():
             self.variables[key] = replace_variables_in_string(
-                f"vars in msg[{key}]", value, self.variables)
+                f"vars in msg[{key}]", str(value), self.variables)
+        """
 
         self.log.debug(f"Final variables after message processing: {self.variables}")
 
@@ -1011,7 +1015,7 @@ def dequote(s):
 
 
 def replace_variables_in_string(var: str,
-                                value: str | None,
+                                val: None,
                                 variables: dict[str, object]
                                 ) -> str | None:
     """Variables can come from the [VARIABLES] section in ini file,
@@ -1019,19 +1023,10 @@ def replace_variables_in_string(var: str,
     message. Supports nested variables.
     """
 
-    if value is None:
-        return None
+    # Make absolutely sure it is a string
+    value = str(val)
 
-    if not isinstance(value, str):
-        logging.info(f"replace_variables_in_string({var}, {value}")
-        logging.warning(
-            "replace_variables_in_string called with %r (%s)",
-            value,
-            type(value).__name__,
-        )
-        value = str(value)
-
-    if value == "":
+    if value is None or value == "":
         return value
 
     logger = logging.getLogger(__name__)
