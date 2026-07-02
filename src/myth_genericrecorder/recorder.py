@@ -38,6 +38,7 @@ class Recorder:
         self.recorder_tunes      = False
         self.tune_thread         = None
         self.tune_status         = "Idle"  # Idle, InProgress, Tuned
+        self.tuned_params        = None
         self.channel_iter        = None
         self.processes           = {}
         self.main_event          = event_callback
@@ -406,27 +407,31 @@ class Recorder:
                                 })
             return
 
+        check_keys = ["callsign", "chanid", "channum", "sourceid"]
+        check_params = {k: kwargs[k] for k in check_keys if k in kwargs}
+        self.log.info(f"Tuning with {check_params}")
+
         if ('Tune' in self.processes and
             self.processes['Tune'] is not None and
-            self.processes['Tune']['command'] == tune_cmd):
+            'status' in self.processes['Tune']):
             status = self.processes['Tune']['status']
-            message = status if status != "Finished" else "Tuned"
 
-            self.log.info(f"Previous tune: {message}")
+        if status == 'Finished' and self.tuned_params == check_params:
+            self.log.info(f"Already tuned to {check_params}")
             self.send_response(kwargs,
                                {"status": "OK",
-                                "message": message},
+                                "message": "Tuned"},
                                logging.DEBUG
                                )
 
-            if status == 'Finished':
-                newep_cmd = self.config.get('NEWEPISODE', {}).get('COMMAND', '')
-                newep_cmd = self.channel_override("NEWEPISODE", newep_cmd)
-                if newep_cmd:
-                    self._execute_command(newep_cmd, "NEWEPISODE",
-                                          background=False)
+            newep_cmd = self.config.get('NEWEPISODE', {}).get('COMMAND', '')
+            newep_cmd = self.channel_override("NEWEPISODE", newep_cmd)
+            if newep_cmd:
+                self._execute_command(newep_cmd, "NEWEPISODE",
+                                      background=False)
             return
 
+        self.tuned_params = check_params
         tune_cmd = self._execute_command(tune_cmd, "Tune",
                                          background=True)
 
