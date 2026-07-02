@@ -31,7 +31,8 @@ class Touch:
         self._worker_thread: Optional[threading.Thread] = None
 
     def _parse_time_string(self, time_str: Optional[str]) -> Optional[float]:
-        if not time_str or not isinstance(time_str, str): return None
+        if not time_str or not isinstance(time_str, str):
+            return None
         try:
             parts = [int(p) for p in time_str.split(":")]
             num_parts = len(parts)
@@ -42,7 +43,8 @@ class Touch:
             elif num_parts == 3:
                 return float((parts[0] * 3600) + (parts[1] * 60) + parts[2])
             return None
-        except ValueError: return None
+        except ValueError:
+            return None
 
     def _loop_executor(self) -> None:
         if self.delay_seconds is not None and self.delay_seconds > 0:
@@ -71,8 +73,8 @@ class Touch:
 
         try:
             current_variables = self.recorder.getVariables()
-            expanded = replace_variables_in_string(self.raw_command,
-                                                   current_variables)
+            expanded = replace_variables_in_string(
+                "touch: execute", self.raw_command, current_variables)
             if not expanded:
                 self.log.error("Touch command generation yielded an "
                                "empty string using current variables.")

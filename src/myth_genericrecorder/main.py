@@ -5,18 +5,15 @@ from importlib.metadata import version
 import argparse
 import json
 
-from myth_genericrecorder.recorder import Recorder, replace_variables_in_string, dequote
+from myth_genericrecorder.recorder import Recorder, replace_variables_in_string
 from myth_genericrecorder.touch import Touch
 from myth_genericrecorder.logger import setup_logging, log
 import logging
 
-import os
 import sys
-import threading
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 import configparser
-import re
 
 
 def parse_arguments() -> argparse.Namespace:
@@ -161,8 +158,8 @@ def parse_config_file(config_path: Path) -> tuple[Dict[str, Any],
         # include_files will iterate over the options/keys under the
         # [INCLUDE] header
         for include_file, _ in config.items('INCLUDE'):
-            include_path = Path(replace_variables_in_string(include_file,
-                                                            variables))
+            include_path = Path(replace_variables_in_string(
+                "include_file", include_file, variables))
 
             # Resolve relative paths relative to the main config file
             if not include_path.is_absolute():
@@ -269,7 +266,7 @@ def main():
 
     if 'RECORDER' not in config:
         log.error("No [RECORDER] section found in configuration.")
-        return False;
+        return False
 
     # Create recorder with configuration
     recorder = Recorder(

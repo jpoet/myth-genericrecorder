@@ -5,8 +5,6 @@ import logging
 import subprocess
 import sys
 import threading
-import time
-from pathlib import Path
 from typing import Dict, Any, Optional, Callable
 import shlex
 import re
@@ -235,7 +233,8 @@ class Recorder:
         self.log.debug("Description? called")
         # Get description from config if available
         desc = self.config.get('RECORDER', {}).get('DESC', 'External Recorder')
-        desc = dequote(replace_variables_in_string(desc, self.variables))
+        desc = dequote(replace_variables_in_string("DESC",
+                                                   desc, self.variables))
         self.send_response(kwargs, {"status": "OK", "message": desc})
 
     def has_tuner(self, **kwargs) -> None:
@@ -488,7 +487,8 @@ class Recorder:
             return
 
         self.command = dequote(replace_variables_in_string
-                               (self.config["RECORDER"]["COMMAND"],
+                               ('self.config["RECORDER"]["COMMAND"]',
+                                self.config["RECORDER"]["COMMAND"],
                                 self.variables))
         self.streaming = True
         self.stream_thread = threading.Thread(target=self._stream_loop)
@@ -600,7 +600,7 @@ class Recorder:
 
     def _channel_info(self, **kwargs):
         key = next(self.channel_iter, None)
-        if key == None:
+        if key is None:
             return self.send_response(kwargs, {"status": "WARN", "message": "DONE"})
 
         channel_data = self.config['CHANNELS'][key]
@@ -646,7 +646,7 @@ class Recorder:
         """
         self.log.debug("NextChannel called")
 
-        if self.channel_iter == None:
+        if self.channel_iter is None:
             self.send_response(kwargs, {"status": "error", "message": "first_channel not called yet."})
             return
 
@@ -795,7 +795,7 @@ class Recorder:
             self.stderr_thread.daemon = True
             self.stderr_thread.start()
 
-            self.log.info(f"Reading from sub process")
+            self.log.info("Reading from sub process")
 
             # Wait until initial data is available
             sel = selectors.DefaultSelector()
@@ -873,7 +873,8 @@ class Recorder:
                 proc['process'].wait()
             self.processes[desc]['status'] = "Idle"
 
-        command = dequote(replace_variables_in_string(command, self.variables))
+        command = dequote(replace_variables_in_string("execute: command",
+                                                      command, self.variables))
 
         # Check if command should run in background (has trailing &)
         ampersand = command.endswith('&')
@@ -974,7 +975,8 @@ class Recorder:
             self.log.debug(f"Added message variable {key.upper()} = {value}")
 
         for key, value in self.variables.items():
-            self.variables[key] = replace_variables_in_string(value, self.variables)
+            self.variables[key] = replace_variables_in_string(
+                f"vars in msg[{key}]", value, self.variables)
 
         self.log.debug(f"Final variables after message processing: {self.variables}")
 
@@ -1003,13 +1005,28 @@ def dequote(s):
     return s
 
 
-def replace_variables_in_string(value: str, variables: dict) -> str:
+def replace_variables_in_string(var: str,
+                                value: str | None,
+                                variables: dict[str, object]
+                                ) -> str | None:
     """Variables can come from the [VARIABLES] section in ini file,
     or from data passed as part of the TuneChannel json
     message. Supports nested variables.
     """
 
-    if not value:
+    if value is None:
+        return None
+
+    if not isinstance(value, str):
+        logging.info(f"replace_variables_in_string({var}, {value}")
+        logging.warning(
+            "replace_variables_in_string called with %r (%s)",
+            value,
+            type(value).__name__,
+        )
+        value = str(value)
+
+    if value == "":
         return value
 
     logger = logging.getLogger(__name__)
@@ -1064,7 +1081,11 @@ def replace_variables_in_string(value: str, variables: dict) -> str:
                            "reached. Possible circular reference in: {value}")
 
     except Exception as e:
-        logger.error(f"Replacing in {value}")
+        logger.error(
+            "Replacing value=%r (type=%s)",
+            value,
+            type(value).__name__,
+        )
         for key, data in variables.items():
             logger.error(f"{key} : {data}")
         logger.exception(f"Failed to replace variables: {e}")
