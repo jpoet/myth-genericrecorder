@@ -5,7 +5,7 @@ from importlib.metadata import version
 import argparse
 import json
 
-from myth_genericrecorder.recorder import Recorder, replace_variables_in_string
+from myth_genericrecorder.recorder import Recorder, replace_variables_in_string, dequote
 from myth_genericrecorder.touch import Touch
 from myth_genericrecorder.logger import setup_logging, log
 import logging
@@ -151,22 +151,20 @@ def parse_config_file(config_path: Path) -> tuple[Dict[str, Any],
         for key, value in config['VARIABLES'].items():
             if value is not None:  # Skip keys without values
                 variables[key.upper()] = value
-                log.debug(f"Loaded variable {key.upper()} = {value}")
 
     # Process INCLUDE section and merge options
     if 'INCLUDE' in config:
         # include_files will iterate over the options/keys under the
         # [INCLUDE] header
         for include_file, _ in config.items('INCLUDE'):
-            include_path = Path(replace_variables_in_string(
-                "include_file", include_file, variables))
+            include_path = Path(replace_variables_in_string(include_file,
+                                                            variables))
 
             # Resolve relative paths relative to the main config file
             if not include_path.is_absolute():
                 include_path = config_path.parent / include_path
 
             if include_path.exists():
-                log.debug(f"Loading included config: {include_path}")
                 include_config = configparser.ConfigParser(allow_no_value=True)
                 include_config.read(include_path)
 
@@ -181,7 +179,7 @@ def parse_config_file(config_path: Path) -> tuple[Dict[str, Any],
                     for key, value in include_config.items(section_name):
                         config.set(section_name, key, value)
             else:
-                log.warning(f"Include file not found: {include_path}")
+                print(f"Include file not found: {include_path}")
 
     # Process all parsed sections with uppercase header normalization
     processed_config = {}
@@ -198,7 +196,6 @@ def parse_config_file(config_path: Path) -> tuple[Dict[str, Any],
         channel_path = Path(channel_file)
 
         if channel_path.exists():
-            log.debug(f"Processing channels from {channel_path}")
             channel_config = configparser.ConfigParser(allow_no_value=True)
             channel_config.read(channel_path)
 
@@ -210,14 +207,9 @@ def parse_config_file(config_path: Path) -> tuple[Dict[str, Any],
                 # Normalize sub-channel blocks to uppercase
                 processed_config['CHANNELS'][section_name.upper()] = process_config_section(channel_config, section_name)
         else:
-            log.debug(f"Channel layout file not found: {channel_path}")
             processed_config['CHANNELS'] = {}
     else:
         processed_config['CHANNELS'] = {}
-
-    # Output debugging traces if enabled
-    for key, data in processed_config.items():
-        log.debug(f"Configuration Map -> [{key}] = {data}")
 
     return processed_config, variables
 
@@ -243,17 +235,6 @@ def main():
 
     # Ensure directory exists
     log_dir.parent.mkdir(parents=True, exist_ok=True)
-    log_file = log_dir / f"myth-genericrecorder-{args.inputid}.log"
-
-    setup_logging(log_file, args.debug, args.quiet,
-                  default_level=args.loglevel)
-    if args.debug:
-        log.setLevel(logging.DEBUG)
-
-    log.critical("Starting myth-genericrecorder")
-    log.debug(f"Command line arguments: {args}")
-    log.debug(f"Log file path: {log_file}")
-
     # Load configuration
     config = {}
     if args.conf:
@@ -267,6 +248,20 @@ def main():
     if 'RECORDER' not in config:
         log.error("No [RECORDER] section found in configuration.")
         return False
+
+    desc = config.get('RECORDER', {}).get('DESC', args.conf.stem)
+    desc = dequote(replace_variables_in_string(desc, variables))
+
+    log_file = log_dir / f"recorder-{desc}.log"
+
+    setup_logging(log_file, args.debug, args.quiet,
+                  default_level=args.loglevel)
+    if args.debug:
+        log.setLevel(logging.DEBUG)
+
+    log.critical(f"Starting myth-genericrecorder {desc}")
+    log.debug(f"Command line arguments: {args}")
+    log.debug(f"Log file path: {log_file}")
 
     # Create recorder with configuration
     recorder = Recorder(

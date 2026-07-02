@@ -175,28 +175,25 @@ class Recorder:
             except Exception as e:
                 self.log.exception(f"Failed to send response: {e}\n{response}")
 
-
-    def channel_override(self, variable : str, default : str):
+    def channel_override(self, variable: str, default: str):
         """Check [TUNER/channel] ini file for commands and values
         which override those in the main config file.
         """
 
         # Get the channum from variables
         channum = self.variables.get('CHANNUM', None)
-        self.log.debug(f"Looking for {variable} for channum {channum}")
         if not channum:
             self.log.debug(f"Could not determine channum for {variable}")
             return default
 
-        if 'TUNER' in self.config and 'CHANNELS' in self.config['TUNER']:
-            self.log.info(f"Looking for {channum} in "
-                              f"{self.config['TUNER']['CHANNELS']}")
-            channel_config = self.config['TUNER']['CHANNELS'].get(channum, {})
-            if variable in channel_config:
-                value = channel_config[variable]
-                self.log.info(f"Using channel[{channum}] specific "
-                              f"{variable}={value}")
-                return value
+        channel_dict = self.config.get('CHANNELS', {}).get(channum, {})
+
+        # Pull the variable from the specific channel's dictionary
+        if variable in channel_dict:
+            value = channel_dict[variable]
+            self.log.info(f"Using channel[{channum}] specific {variable}={value}")
+            return value
+
         return default
 
     def api_version(self, **kwargs) -> None:
@@ -234,8 +231,7 @@ class Recorder:
         self.log.debug("Description? called")
         # Get description from config if available
         desc = self.config.get('RECORDER', {}).get('DESC', 'External Recorder')
-        desc = dequote(replace_variables_in_string("DESC",
-                                                   desc, self.variables))
+        desc = dequote(replace_variables_in_string(desc, self.variables))
         self.send_response(kwargs, {"status": "OK", "message": desc})
 
     def has_tuner(self, **kwargs) -> None:
@@ -439,7 +435,7 @@ class Recorder:
 
         self.send_response(kwargs, {
             "status": "OK",
-            "message": f"InProgress `{tune_cmd}`"
+            "message": "InProgress"
         })
 
     def close_recorder(self, **kwargs) -> None:
@@ -494,8 +490,7 @@ class Recorder:
             return
 
         self.command = dequote(replace_variables_in_string
-                               ('self.config["RECORDER"]["COMMAND"]',
-                                self.config["RECORDER"]["COMMAND"],
+                               (self.config["RECORDER"]["COMMAND"],
                                 self.variables))
         self.streaming = True
         self.stream_thread = threading.Thread(target=self._stream_loop)
@@ -880,8 +875,7 @@ class Recorder:
                 proc['process'].wait()
             self.processes[desc]['status'] = "Idle"
 
-        command = dequote(replace_variables_in_string("execute: command",
-                                                      command, self.variables))
+        command = dequote(replace_variables_in_string(command, self.variables))
 
         # Check if command should run in background (has trailing &)
         ampersand = command.endswith('&')
@@ -991,8 +985,7 @@ class Recorder:
 
     def signal_event(self, event_type: str,
                      details: Optional[Dict[str, Any]] = None) -> None:
-        """Safely signals an operational event back to the main
-        application context."""
+        # signals an operational event back to the main application context.
         if self.main_event:
             try:
                 # Fallback to an empty dictionary if no extra context
@@ -1014,8 +1007,7 @@ def dequote(s):
     return s
 
 
-def replace_variables_in_string(var: str,
-                                val: None,
+def replace_variables_in_string(val: None,
                                 variables: dict[str, object]
                                 ) -> str | None:
     """Variables can come from the [VARIABLES] section in ini file,
