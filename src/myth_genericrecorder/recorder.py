@@ -10,7 +10,6 @@ import shlex
 import re
 import selectors
 
-
 from importlib.metadata import version
 __version__ = version("myth-genericrecorder")
 
@@ -79,6 +78,7 @@ class Recorder:
             "FirstChannel"         : self.first_channel,
             "NextChannel"          : self.next_channel
         }
+
         self.log.trace(f"Recorder.__init__ called with config={config}")
 
     def __del__(self):
@@ -98,14 +98,14 @@ class Recorder:
                     proc['process'].kill()
                     proc['process'].wait()
 
-
     def handle_touch_error(self, exit_code: int, error_msg: str) -> None:
         """Touch class calls this when a command fails and
         DAMAGED_ON_FAILURE is true
         """
+        self.log.warning(error_msg)
         level = logging.WARN
         response = {
-            "message": error_msg,
+            "message": f'DAMAGED: {error_msg}',
             "status": "DAMAGED"
         }
         self.send_response({"command": "STATUS"}, response, level)
@@ -180,18 +180,27 @@ class Recorder:
         which override those in the main config file.
         """
 
-        # Get the channum from variables
-        channum = self.variables.get('CHANNUM', None)
-        if not channum:
-            self.log.debug(f"Could not determine channum for {variable}")
+        if 'CHANNELS' not in self.config:
             return default
 
-        channel_dict = self.config.get('CHANNELS', {}).get(channum, {})
+        channels = self.config.get('CHANNELS')
 
-        # Pull the variable from the specific channel's dictionary
+        # Get the callsign from variables
+        callsign = self.variables.get("CALLSIGN", None)
+        channel_dict = channels.get(callsign, None)
+        where = f'callsign[{callsign}]'
+        if channel_dict is None:
+            channum = self.variables.get('CHANNUM', None)
+            channel_dict = channels.get(channum, None)
+            where = f'channum[{channum}]'
+
+        if channel_dict is None:
+            self.log.debug(f"Could not determine callsign/channum for {variable}")
+            return default
+
         if variable in channel_dict:
             value = channel_dict[variable]
-            self.log.info(f"Using channel[{channum}] specific {variable}={value}")
+            self.log.info(f"Using {where} specific {variable}={value}")
             return value
 
         return default
@@ -379,6 +388,9 @@ class Recorder:
                 self.log.debug(f"{key}: {value}")
 
         self.process_variables_in_message(kwargs)
+
+        # Replace variables in the command
+        self.variables['URL'] = self.channel_override("URL", "")
 
         if self.recorder_tunes:
             self.send_response(kwargs,
@@ -1084,3 +1096,24 @@ def replace_variables_in_string(val: None,
         return None
 
     return current_value
+
+
+    def handle_recorder_event(event_type: str, data: dict) -> None:
+        global PREPARED_TOUCHES, ACTIVE_TOUCHES
+
+        if len(PREPARED_TOUCHES) == 0:
+            return
+
+        if event_type == "RECSTART":
+            logging.info("Starting Touch loops...")
+            for keepalive in PREPARED_TOUCHES:
+                keepalive.start()
+                # Move the reference to the active list instead of deleting it
+                ACTIVE_TOUCHES.append(keepalive)
+            PREPARED_TOUCHES.clear()
+
+        elif event_type == "STREAM_STOPPED":
+            logging.warning("Stopping Touch loops...")
+            for keepalive in ACTIVE_TOUCHES:
+                keepalive.stop()
+            ACTIVE_TOUCHES.clear()

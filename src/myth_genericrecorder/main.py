@@ -91,7 +91,7 @@ def handle_recorder_event(event_type: str, data: dict) -> None:
         return
 
     if event_type == "RECSTART":
-        logging.info("Starting Touch loops...")
+        log.debug("Starting Touch loops...")
         for keepalive in PREPARED_TOUCHES:
             keepalive.start()
             # Move the reference to the active list instead of deleting it
@@ -99,7 +99,7 @@ def handle_recorder_event(event_type: str, data: dict) -> None:
         PREPARED_TOUCHES.clear()
 
     elif event_type == "STREAM_STOPPED":
-        logging.warning("Stopping Touch loops...")
+        log.warning("Stopping Touch loops...")
         for keepalive in ACTIVE_TOUCHES:
             keepalive.stop()
         ACTIVE_TOUCHES.clear()
@@ -216,7 +216,7 @@ def parse_config_file(config_path: Path) -> tuple[Dict[str, Any],
 
 ############
 # Main entry
-def main():
+def startup():
     """Main entry point."""
     args = parse_arguments()
     variables = None
@@ -280,6 +280,7 @@ def main():
         command = touch_config.get('COMMAND')
         delay = touch_config.get('DELAY')
         frequency = touch_config.get('FREQUENCY')
+        log_level = touch_config.get('LOGLEVEL', 'DEBUG')
 
         # Pull the new field out (will safely return None if omitted)
         damaged_on_failure_str = touch_config.get('DAMAGED_ON_FAILURE')
@@ -293,6 +294,7 @@ def main():
                 delay=delay,
                 command=command,
                 recorder_instance=recorder,
+                log_level=log_level,
                 damaged_on_failure_str=damaged_on_failure_str # Pass it here!
             )
 
@@ -342,6 +344,12 @@ def main():
         keepalive.stop()
 
     ACTIVE_TOUCHES.clear()
+
+
+def main():
+    if startup():
+        sys.exit(0)
+    sys.exit(1)
 
 
 if __name__ == "__main__":

@@ -8,19 +8,28 @@ from myth_genericrecorder.recorder import Recorder, replace_variables_in_string,
 
 class Touch:
     def __init__(self,
+                 recorder_instance: Recorder,
                  frequency: Optional[str],
                  command: Optional[str],
-                 recorder_instance: Recorder,
                  delay: Optional[str] = None,
+                 log_level = "DEBUG",
                  damaged_on_failure_str: Optional[str] = None):
 
         self.log = logging.getLogger(__name__)
+        if isinstance(log_level, str):
+            # Converts "INFO" -> 20, "DEBUG" -> 10. Defaults to 20 (INFO) if missing.
+            self.log_level = logging.getLevelNamesMapping().get(log_level.upper(), logging.DEBUG)
+        elif isinstance(log_level, int):
+            self.log_level = log_level
+        else:
+            self.log_level = logging.DEBUG  # Safe default fallback
+
         self.recorder = recorder_instance
         self.raw_command: str = command or ""
         self.frequency_str = frequency
         self.delay_str = delay
 
-        self.damaged_on_failure: bool = str(damaged_on_failure_str).strip().lower() == 'true'
+        self.damaged_on_failure: bool = str(damaged_on_failure_str).strip().casefold() == 'true'
 
         # Parse intervals into total float seconds
         self.interval_seconds: Optional[float] = self._parse_time_string(frequency)
@@ -56,8 +65,8 @@ class Touch:
         self._execute_command()
 
         if self.interval_seconds is None:
-            self.log.info("Single-shot Touch execution complete. "
-                          "Exiting thread gracefully.")
+            self.log.log(self.log_level,
+                         "Single-shot Touch execution complete.")
             return
 
         while not self._stop_event.is_set():
@@ -73,8 +82,8 @@ class Touch:
 
         try:
             current_variables = self.recorder.getVariables()
-            expanded = replace_variables_in_string(
-                "touch: execute", self.raw_command, current_variables)
+            expanded = replace_variables_in_string(self.raw_command,
+                                                   current_variables)
             if not expanded:
                 self.log.error("Touch command generation yielded an "
                                "empty string using current variables.")
@@ -91,8 +100,9 @@ class Touch:
             )
 
             if result.returncode == 0:
-                self.log.info("Command executed successfully (Exit 0): "
-                              f"'{active_command}'")
+                self.log.log(self.log_level,
+                             "Command executed successfully (Exit 0): "
+                             f"'{active_command}'")
                 if result.stdout.strip():
                     self.log.debug(f"stdout: {result.stdout.strip()}")
             else:
