@@ -240,7 +240,7 @@ class Recorder:
         self.log.debug("Description? called")
         # Get description from config if available
         desc = self.config.get('RECORDER', {}).get('DESC', 'External Recorder')
-        desc = dequote(replace_variables_in_string(desc, self.variables))
+        desc = dequote(clean_variables_in_string(desc, self.variables))
         self.send_response(kwargs, {"status": "OK", "message": desc})
 
     def has_tuner(self, **kwargs) -> None:
@@ -501,7 +501,7 @@ class Recorder:
                                "message": "No [RECORDER/command] specified"})
             return
 
-        self.command = dequote(replace_variables_in_string
+        self.command = dequote(clean_variables_in_string
                                (self.config["RECORDER"]["COMMAND"],
                                 self.variables))
         self.streaming = True
@@ -887,7 +887,7 @@ class Recorder:
                 proc['process'].wait()
             self.processes[desc]['status'] = "Idle"
 
-        command = dequote(replace_variables_in_string(command, self.variables))
+        command = dequote(clean_variables_in_string(command, self.variables))
 
         # Check if command should run in background (has trailing &)
         ampersand = command.endswith('&')
@@ -1097,23 +1097,11 @@ def replace_variables_in_string(val: None,
 
     return current_value
 
+def clean_variables_in_string(val: None,
+                              variables: dict[str, object]
+                              ) -> str | None:
+    result = replace_variables_in_string(val, variables)
 
-    def handle_recorder_event(event_type: str, data: dict) -> None:
-        global PREPARED_TOUCHES, ACTIVE_TOUCHES
-
-        if len(PREPARED_TOUCHES) == 0:
-            return
-
-        if event_type == "RECSTART":
-            logging.info("Starting Touch loops...")
-            for keepalive in PREPARED_TOUCHES:
-                keepalive.start()
-                # Move the reference to the active list instead of deleting it
-                ACTIVE_TOUCHES.append(keepalive)
-            PREPARED_TOUCHES.clear()
-
-        elif event_type == "STREAM_STOPPED":
-            logging.warning("Stopping Touch loops...")
-            for keepalive in ACTIVE_TOUCHES:
-                keepalive.stop()
-            ACTIVE_TOUCHES.clear()
+    # Now get rid if any undefined vars
+    pattern = r'\$\{[^}]+\}'
+    return re.sub(pattern, '', result)
