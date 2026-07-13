@@ -553,17 +553,26 @@ class Recorder:
                                     "message": "Started Streaming"})
         self.variables['XONCOUNT'] += 1
 
-        xon_cmd = self.config.get('XON', {}).get('COMMAND', '')
-        xon_cmd = self.channel_override("XON", xon_cmd)
-        if xon_cmd and self.variables['XONCOUNT'] == 2:
-            self._execute_command(xon_cmd, "XON", background=False)
+        if self.variables['XONCOUNT'] == 2:
+            starting_cmd = self.config.get('TUNER', {}).get('RECSTARTING', "")
+            starting_cmd = self.channel_override("RECSTARTING", starting_cmd)
+            if starting_cmd:
+                self.log.info(f"RECSTARTING: {starting_cmd}")
+                self._execute_command(starting_cmd, "RECSTARTING",
+                                      background=False)
+            else:
+                self.log.info("RECSTARTING: empty")
+        else:
+            self.log.info(f"RECSTARTING: xoncount: {self.variables['XONCOUNT']}")
 
         self.xon_state = True
 
-        recstart_cmd = self.config.get('RECSTART', {}).get('COMMAND', '')
-        recstart_cmd = self.channel_override("RECSTART", recstart_cmd)
-        if recstart_cmd:
-            self._execute_command(recstart_cmd, "RECSTART", background=False)
+        if self.variables['XONCOUNT'] == 2:
+            started_cmd = self.config.get('TUNER', {}).get('RECSTARTED', "")
+            started_cmd = self.channel_override("RECSTARTED", started_cmd)
+            if started_cmd:
+                self._execute_command(started_cmd,
+                                      "RECSTARTED", background=False)
 
         self.signal_event("RECSTART")
 
@@ -809,31 +818,6 @@ class Recorder:
             self.stderr_thread.daemon = True
             self.stderr_thread.start()
 
-            self.log.info("Reading from sub process")
-
-            # Wait until initial data is available
-            sel = selectors.DefaultSelector()
-            sel.register(self.stream_process.stdout, selectors.EVENT_READ)
-            while True:
-                # Check for events (0.1s timeout so loop remains responsive)
-                events = sel.select(timeout=0.1)
-                if events or self.stream_process.poll() is not None:
-                    break
-
-            sel.unregister(self.stream_process.stdout)
-            sel.close()
-
-            if self.ondatastart_done:
-                self.log.info("Already ran OnDataStart")
-            else:
-                # Execute ondatastart command if available
-                data_cmd = self.config.get('TUNER', {}).get('ONDATASTART', "")
-                data_cmd = self.channel_override("ONSTART", data_cmd)
-                if data_cmd:
-                    self._execute_command(data_cmd,
-                                          "ONDATA",
-                                          background=False)
-
             while self.streaming:
                 # Read up to block_size at a time
                 chunk = self.stream_process.stdout.read(self.block_size)
@@ -939,6 +923,7 @@ class Recorder:
                     status = "WARN"
                 response = {"message" : msg, "status": status}
                 self.send_response({"command": "STATUS"}, response, level)
+                self.log.info(f"Executed `{command}`")
 
             except Exception as e:
                 self.log.error(f"Error executing {desc} command: {e}")

@@ -152,34 +152,34 @@ def parse_config_file(config_path: Path) -> tuple[Dict[str, Any],
             if value is not None:  # Skip keys without values
                 variables[key.upper()] = value
 
-    # Process INCLUDE section and merge options
-    if 'INCLUDE' in config:
-        # include_files will iterate over the options/keys under the
-        # [INCLUDE] header
-        for include_file, _ in config.items('INCLUDE'):
-            include_path = Path(replace_variables_in_string(include_file,
-                                                            variables))
+    # Look for any configuration sections starting with "INCLUDE:"
+    include_sections = [sec for sec in config.keys() if sec.startswith('INCLUDE:')]
+    prefix_len = len('INCLUDE:')
+    for section in include_sections:
+        include_file = section[prefix_len:]
+        include_path = Path(replace_variables_in_string(include_file,
+                                                        variables))
 
-            # Resolve relative paths relative to the main config file
-            if not include_path.is_absolute():
-                include_path = config_path.parent / include_path
+        # Resolve relative paths relative to the main config file
+        if not include_path.is_absolute():
+            include_path = config_path.parent / include_path
 
-            if include_path.exists():
-                include_config = configparser.ConfigParser(allow_no_value=True)
-                include_config.read(include_path)
+        if include_path.exists():
+            include_config = configparser.ConfigParser(allow_no_value=True)
+            include_config.read(include_path)
 
-                # Safe Explicit Merge: Build configuration data nodes correctly
-                for section_name in include_config.sections():
-                    if section_name == 'DEFAULT':
-                        continue
+            # Safe Explicit Merge: Build configuration data nodes correctly
+            for section_name in include_config.sections():
+                if section_name == 'DEFAULT':
+                    continue
 
-                    if not config.has_section(section_name):
-                        config.add_section(section_name)
+                if not config.has_section(section_name):
+                    config.add_section(section_name)
 
-                    for key, value in include_config.items(section_name):
-                        config.set(section_name, key, value)
-            else:
-                print(f"Include file not found: {include_path}")
+                for key, value in include_config.items(section_name):
+                    config.set(section_name, key, value)
+        else:
+            print(f"Include file not found: {include_path}")
 
     # Process all parsed sections with uppercase header normalization
     processed_config = {}
