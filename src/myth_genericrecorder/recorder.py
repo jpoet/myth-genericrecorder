@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Recorder module for MythTV ExternalRecorder program."""
 import json
+from myth_genericrecorder.logger import TRACE_LEVEL_NUM
 import logging
 import subprocess
 import sys
@@ -8,7 +9,6 @@ import threading
 from typing import Dict, Any, Optional, Callable
 import shlex
 import re
-import selectors
 
 from importlib.metadata import version
 __version__ = version("myth-genericrecorder")
@@ -132,7 +132,7 @@ class Recorder:
 
         try:
             # Execute the handler
-            self.log.debug(f"Executing handler for command: {command}")
+            self.log.trace(f"Executing handler for command: {command}")
             handler = self.handlers[command]
             handler(**message)
         except Exception as e:
@@ -195,7 +195,7 @@ class Recorder:
             where = f'channum[{channum}]'
 
         if channel_dict is None:
-            self.log.debug(f"Could not determine callsign/channum for {variable}")
+            self.log.trace(f"Could not determine callsign/channum for {variable}")
             return default
 
         if variable in channel_dict:
@@ -213,7 +213,7 @@ class Recorder:
         """ Example response:
         {"command": "APIVersion", "serial": 1, "value": "3", "status": "OK"}
         """
-        self.log.debug("APIVersion called")
+        self.log.trace("APIVersion called")
         self.send_response(kwargs, {"status": "OK"})
 
     def version(self, **kwargs) -> None:
@@ -224,7 +224,7 @@ class Recorder:
         """ Example response:
         {"command":"APIVersion","message":"3","serial":"1","status":"OK"}
         """
-        self.log.debug("Version? called")
+        self.log.trace("Version? called")
         self.send_response(kwargs, {"status": "OK", "message": __version__})
 
     def description(self, **kwargs) -> None:
@@ -235,9 +235,9 @@ class Recorder:
         """ Example response:
         {"command":"Description?","message":"mag-1-2-3","serial":"3","status":"OK"}
         """
-        self.log.debug(f"Variables:\n{self.variables}")
+        self.log.trace(f"Variables:\n{self.variables}")
 
-        self.log.debug("Description? called")
+        self.log.trace("Description? called")
         # Get description from config if available
         desc = self.config.get('RECORDER', {}).get('DESC', 'External Recorder')
         desc = dequote(clean_variables_in_string(desc, self.variables))
@@ -251,7 +251,7 @@ class Recorder:
         """ Example response:
         {"command":"HasTuner","message":"Yes","serial":"2","status":"OK"}
         """
-        self.log.debug("HasTuner? called")
+        self.log.trace("HasTuner? called")
         if 'TUNER' not in self.config:
             self.log.warn(f"Failed to find [TUNER] section in {self.config}")
             self.recorder_tunes = False
@@ -277,7 +277,7 @@ class Recorder:
         """ Example response:
         {"command":"HasPictureAttributes","message":"No","serial":"4","status":"OK"}
         """
-        self.log.debug("HasPictureAttributes? called")
+        self.log.trace("HasPictureAttributes? called")
         self.send_response(kwargs, {"status": "OK", "message": "No"})
 
     def flow_control(self, **kwargs) -> None:
@@ -288,7 +288,7 @@ class Recorder:
         """ Example response:
         {"command":"FlowControl?","message":"XON/XOFF","serial":"5","status":"OK"}
         """
-        self.log.debug("FlowControl? called")
+        self.log.trace("FlowControl? called")
         self.send_response(kwargs, {"status": "OK", "message": "XON/XOFF"})
 
     def block_size_handler(self, **kwargs) -> None:
@@ -299,7 +299,7 @@ class Recorder:
         """ Example response:
         {"command":"BlockSize","message":"Blocksize 3080192","serial":"6","status":"OK"}
         """
-        self.log.debug("BlockSize called")
+        self.log.trace("BlockSize called")
         self.send_response(kwargs, {"status": "OK", "message": f"Blocksize {self.block_size}"})
 
     def lock_timeout(self, **kwargs) -> None:
@@ -311,7 +311,7 @@ class Recorder:
         {"command":"LockTimeout","message":"30000","serial":"8","status":"OK"}
         """
 
-        self.log.debug("LockTimeout? called")
+        self.log.trace("LockTimeout? called")
         # Get timeout from config if available
         timeout = self.config.get('TUNER', {}).get('TIMEOUT', '30000')
         timeout = self.channel_override("TIMEOUT", timeout)
@@ -327,26 +327,32 @@ class Recorder:
         {"command":"SignalStrengthPercent?","serial":11}
         """
 
-        self.log.debug("SignalStrengthPercent? called")
+        self.log.trace("SignalStrengthPercent? called")
         if self.recorder_tunes:
             message = "100"
+            level = logging.INFO
         elif ('Tune' not in self.processes or
             # Tuner command has not been run yet.
             self.processes['Tune'] is None or
             self.processes['Tune']['process'] is None):
             message = "0"
+            level = logging.DEBUG
         else:
             status = self.processes['Tune']['status']
             if status == "InProgress":
                 # Tuner command is still running.
                 message = "25"
+                level = TRACE_LEVEL_NUM
             elif status == "Finished":
                 # Tuner command has finished
                 message = "100"
+                level = logging.INFO
             else:
                 # Catchall. Should never get here.
                 message = "0"
-        self.send_response(kwargs, {"status": "OK", "message": message})
+                level = logging.DEBUG
+        self.send_response(kwargs, {"status": "OK", "message": message},
+                           level)
 
     def has_lock(self, **kwargs) -> None:
         """Handle HasLock? command."""
@@ -357,19 +363,23 @@ class Recorder:
         {"command":"HasLock?","serial":12}
         """
 
-        self.log.debug("SignalStrengthPercent? called")
+        self.log.trace("SignalStrengthPercent? called")
         if self.recorder_tunes:
             message = "Yes"
+            level = logging.INFO
         elif ('Tune' not in self.processes or
             # Tuner command has not been run yet.
             self.processes['Tune'] is None or
             self.processes['Tune']['process'] is None):
             message = "No"
+            level = TRACE_LEVEL_NUM
         else:
             # If Tuner has finished, then we are "locked"
             status = self.processes['Tune']['status']
             message = "Yes" if status == "Finished" else "No"
-        self.send_response(kwargs, {"status": "OK", "message": message})
+            level = logging.INFO
+        self.send_response(kwargs, {"status": "OK", "message": message},
+                           level)
 
     def tune_channel(self, **kwargs) -> None:
         """Handle TuneChannel command."""
@@ -379,13 +389,13 @@ class Recorder:
         """ Example response:
         {"command":"TuneChannel","message":"InProgress `/usr/local/bin/roku-control --channum 318"`","serial":"9","status":"OK"}
         """
-        self.log.debug("TuneChannel called")
-        self.log.debug(f"Received TuneChannel message: {kwargs}")
+        self.log.trace("TuneChannel called")
+        self.log.trace(f"Received TuneChannel message: {kwargs}")
 
         # Update variables with message data
         if self.log.isEnabledFor(logging.DEBUG):
             for key, value in kwargs.items():
-                self.log.debug(f"{key}: {value}")
+                self.log.trace(f"{key}: {value}")
 
         self.process_variables_in_message(kwargs)
 
@@ -459,7 +469,7 @@ class Recorder:
         {"command":"CloseRecorder","message":"Terminating","serial":"9","status":"OK"}
         """
         self.streaming = False
-        self.log.debug("CloseRecorder called")
+        self.log.trace("CloseRecorder called")
         self.send_response(kwargs, {"status": "OK", "message": "Terminating"})
         sys.exit(0)
 
@@ -472,7 +482,7 @@ class Recorder:
         {"command":"IsOpen?","message":"Not Open yet","serial":"13","status":"WARN"}
         """
 
-        self.log.debug("IsOpen? called")
+        self.log.trace("IsOpen? called")
         msg = "Open" if self.stream_process else "No"
         self.send_response(kwargs, {"status": "OK", "message": msg})
 
@@ -484,8 +494,8 @@ class Recorder:
         """ Example response:
         {"command":"StartStreaming","message":"Streaming Started","serial":"11","status":"OK"}
         """
-        self.log.debug("StartStreaming called")
-        self.log.debug(f"Variables before command processing: {self.variables}")
+        self.log.trace("StartStreaming called")
+        self.log.trace(f"Variables before command processing: {self.variables}")
 
         if self.streaming:
             self.log.warning("Already streaming")
@@ -519,7 +529,7 @@ class Recorder:
         """ Example response:
         {"command":"StopStreaming","message":"Streaming Stopped","serial":"12","status":"OK"}
         """
-        self.log.debug("StopStreaming called")
+        self.log.trace("StopStreaming called")
 
         if not self.streaming:
             self.log.warning("Not currently streaming")
@@ -548,7 +558,7 @@ class Recorder:
         """ Example response:
         {"command":"XON","message":"Started Streaming","serial":"12","status":"OK"}
         """
-        self.log.debug("XON called")
+        self.log.trace("XON called")
         self.send_response(kwargs, {"status": "OK",
                                     "message": "Started Streaming"})
         self.variables['XONCOUNT'] += 1
@@ -586,7 +596,7 @@ class Recorder:
         """ Example response:
         {"command":"XOFF","message":"Stopped Streaming","serial":"13","status":"OK"}
         """
-        self.log.debug("XOFF called")
+        self.log.trace("XOFF called")
         self.xon_state = False
         self.send_response(kwargs, {"status": "OK",
                                     "message": "Stopped Streaming"})
@@ -594,10 +604,10 @@ class Recorder:
         if 'XONCOUNT' in self.variables and self.variables['XONCOUNT'] < 2:
             return
 
-        recstop_cmd = self.config.get('RECSTOP', {}).get('COMMAND', '')
-        recstop_cmd = self.channel_override("RECSTOP", recstop_cmd)
+        recstop_cmd = self.config.get('RECSTOPPED', {}).get('COMMAND', '')
+        recstop_cmd = self.channel_override("RECSTOPPED", recstop_cmd)
         if recstop_cmd:
-            self._execute_command(recstop_cmd, "RECSTOP", background=False)
+            self._execute_command(recstop_cmd, "RECSTOPPED", background=False)
 
 
     def load_channels(self, **kwargs) -> None:
@@ -608,7 +618,7 @@ class Recorder:
         """ Example response:
         {"command":"LoadChannels","message":"52","serial":"19","status":"OK"}
         """
-        self.log.debug("LoadChannels called")
+        self.log.trace("LoadChannels called")
 
         # Get channel count from CHANNELS section
         channel_count = 0
@@ -617,7 +627,7 @@ class Recorder:
 
         if self.log.isEnabledFor(logging.DEBUG):
             for key,value in self.config['CHANNELS'].items():
-                self.log.debug(f"{key} : {value}")
+                self.log.trace(f"{key} : {value}")
 
         self.send_response(kwargs, {"status": "OK", "message": str(channel_count)})
 
@@ -649,7 +659,7 @@ class Recorder:
         """ Example response:
         {"command":"FirstChannel","message":"ChanNum,ChanName,Callsign,xmltvid,icon","serial":"20","status":"OK"}
         """
-        self.log.debug("FirstChannel called")
+        self.log.trace("FirstChannel called")
 
         if 'CHANNELS' not in self.config or not self.config['CHANNELS']:
             self.send_response(kwargs, {"status": "error", "message": "No channels available"})
@@ -667,7 +677,7 @@ class Recorder:
         """ Example response:
         {"command":"NextChannel","message":"ChanNum,ChanName,Callsign,xmltvid,icon","serial":"21","status":"OK"}
         """
-        self.log.debug("NextChannel called")
+        self.log.trace("NextChannel called")
 
         if self.channel_iter is None:
             self.send_response(kwargs, {"status": "error", "message": "first_channel not called yet."})
@@ -677,7 +687,7 @@ class Recorder:
 
     def tune_status_handler(self, **kwargs) -> None:
         """Handle TuneStatus? command."""
-        self.log.debug("TuneStatus? called")
+        self.log.trace("TuneStatus? called")
 
         if self.recorder_tunes:
             message = "Tuned"
@@ -698,7 +708,7 @@ class Recorder:
         self.send_response(kwargs,
                            {"status": "OK",
                             "message": message},
-                           logging.DEBUG
+                           TRACE_LEVEL_NUM
                            )
 
     def _read_stderr(self) -> None:
@@ -764,7 +774,7 @@ class Recorder:
                 prefix, sep, message = line.partition(':')
             elif line.lower().startswith("trace"):
                 status = "TRACE"
-                level = logging.TRACE
+                level = TRACE_LEVEL_NUM
                 prefix, sep, message = line.partition(':')
 
             if len(message) == 0:
@@ -775,6 +785,7 @@ class Recorder:
             if message[0] == ' ':
                 message = message[1:]
 
+            # If not XON (streaming), then strip DAMAGE prefix
             if not self.xon_state and message.lower().startswith("damage"):
                 prefix, sep, message = message.partition(':')
                 if message[0] == ' ':
@@ -804,7 +815,7 @@ class Recorder:
         try:
             # Split command into args for subprocess
             cmd_args = shlex.split(self.command)
-            self.log.debug(f"Splitting command into args: {cmd_args}")
+            self.log.trace(f"Splitting command into args: {cmd_args}")
             self.stream_process = subprocess.Popen(
                 cmd_args,
                 stdout=subprocess.PIPE,
@@ -961,8 +972,8 @@ class Recorder:
 
     def process_variables_in_message(self, message: Dict[str, Any]) -> None:
         """Process variables from the TuneChannel message."""
-        self.log.debug(f"Processing message variables. Message: {message}")
-        self.log.debug(f"Initial variables: {self.variables}")
+        self.log.trace(f"Processing message variables. Message: {message}")
+        self.log.trace(f"Initial variables: {self.variables}")
 
         # Update with message data
         for key, value in message.items():
@@ -970,7 +981,7 @@ class Recorder:
                 continue
             # Convert key to uppercase for consistent naming
             self.variables[key.upper()] = str(value)
-            self.log.debug(f"Added message variable {key.upper()} = {value}")
+            self.log.trace(f"Added message variable {key.upper()} = {value}")
 
         """
         for key, value in self.variables.items():
@@ -978,7 +989,7 @@ class Recorder:
                 f"vars in msg[{key}]", str(value), self.variables)
         """
 
-        self.log.debug(f"Final variables after message processing: {self.variables}")
+        self.log.trace(f"Final variables after message processing: {self.variables}")
 
     def signal_event(self, event_type: str,
                      details: Optional[Dict[str, Any]] = None) -> None:
@@ -988,7 +999,7 @@ class Recorder:
                 # Fallback to an empty dictionary if no extra context
                 # details are passed
                 data = details or {}
-                self.log.debug(f"Signaling event '{event_type}' to main...")
+                self.log.trace(f"Signaling event '{event_type}' to main...")
 
                 # Execute the callback defined in main.py
                 self.main_event(event_type, data)

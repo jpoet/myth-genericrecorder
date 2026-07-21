@@ -44,12 +44,12 @@ def setup_logging(filename, debug=False, quiet=False, default_level='INFO'):
         optstr = '--quiet' + (' --debug' if debug else '')
     elif debug:
         file_level = 'DEBUG'
-        console_level = 'DEBUG'
+        console_level = 'INFO'  # Never send debug to mythbackend
         optstr = '--debug'
     else:
         # Accepts 'TRACE', 'DEBUG', 'INFO', etc. straight from your CLI args
         file_level = default_level.upper()
-        console_level = default_level.upper()
+        console_level = 'INFO'  # Never send debug to mythbackend
         optstr = f'--log-level {default_level}'
 
     dict_conf = {

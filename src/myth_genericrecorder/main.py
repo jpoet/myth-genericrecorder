@@ -69,11 +69,11 @@ Usage examples:
     )
     parser.add_argument(
         '--debug', action='store_true',
-        help='turn on debug messages (%(default)s)'
+        help='turn on debug messages)'
     )
     parser.add_argument(
         '--quiet', action='store_true',
-        help='suppress progress messages (%(default)s)'
+        help='suppress progress messages)'
     )
 
     return parser.parse_args()
@@ -261,7 +261,7 @@ def startup():
 
     log.critical(f"Starting myth-genericrecorder {desc}")
     log.debug(f"Command line arguments: {args}")
-    log.debug(f"Log file path: {log_file}")
+    log.trace(f"Log file path: {log_file}")
 
     # Create recorder with configuration
     recorder = Recorder(
@@ -280,13 +280,13 @@ def startup():
         command = touch_config.get('COMMAND')
         delay = touch_config.get('DELAY')
         frequency = touch_config.get('FREQUENCY')
-        log_level = touch_config.get('LOGLEVEL', 'DEBUG')
+        log_level = touch_config.get('LOGLEVEL', 'TRACE')
 
         # Pull the new field out (will safely return None if omitted)
         damaged_on_failure_str = touch_config.get('DAMAGED_ON_FAILURE')
 
         if command:
-            log.debug("Preparing background Touch instance "
+            log.trace("Preparing background Touch instance "
                       f"for section: [{section}]")
 
             keepalive = Touch(
@@ -318,7 +318,7 @@ def startup():
                     sys.stderr.write("OK:3\n")
                     continue
                 message = json.loads(line)
-                log.debug(f"Raw JSON message: {line}")
+                log.trace(f"Raw JSON message: {line}")
 
                 # Process the command
                 recorder.process_command(message)
