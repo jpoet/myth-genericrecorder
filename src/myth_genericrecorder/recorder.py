@@ -159,6 +159,8 @@ class Recorder:
                 sys.stderr.flush()
 
                 if response['command'] == 'STATUS':
+                    if level == logging.DEBUG:
+                        level = logging.INFO
                     self.log.log(level, f"> {response['message']}")
                 else:
                     if 'message' in response:
